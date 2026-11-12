@@ -1,0 +1,383 @@
+export const defaultCompanySettings = {
+  companyName: "אודי מרילי פתרונות תעסוקה יצירתיים בע\"מ",
+  brandSubtitle: "צמיחה אישית. דרך. תעסוקה",
+  hpNumber: "514024694",
+  taxDeductionNumber: "941707242", // תיק ניכויים
+  hrManagerName: "יפעת אודי מרילי",
+  hrEmail: "udimarili2@gmail.com",
+  phone: "077-5177045",
+  fax: "077-5177046",
+  address: "פייר קניג 37 ירושלים / יד חרוצים 16 ירושלים",
+  website: "www.marili.co.il",
+  totalCapacity: 180,
+  defaultHourlyWage: "35.40"
+};
+
+export const defaultForms = [
+  {
+    id: "form-personal-bank",
+    title: "1. פרטים אישיים, חשבון בנק והסכמה לתלוש דיגיטלי",
+    description: "פרטים אישיים, כתובת, פרטי חשבון בנק להעברת משכורת ואישור קבלת תלוש במייל",
+    category: "פרטים אישיים ושכר",
+    required: true,
+    estimatedMinutes: 3,
+    icon: "UserCheck",
+    fields: [
+      { id: "fullName", label: "שם מלא (עברית)", type: "text", required: true, placeholder: "ישראל ישראלי" },
+      { id: "gender", label: "מגדר (לקביעת טפסי משטרה נדרשים כחוק)", type: "select", options: ["אישה", "גבר"], required: true },
+      { id: "idNumber", label: "מספר תעודת זהות (9 ספרות)", type: "text", required: true, placeholder: "012345678" },
+      { id: "birthDate", label: "תאריך לידה", type: "date", required: true },
+      { id: "phone", label: "טלפון נייד", type: "tel", required: true, placeholder: "050-1234567" },
+      { id: "email", label: "כתובת דואר אלקטרוני לקבלת תלוש שכר", type: "email", required: true, placeholder: "israel@example.com" },
+      { id: "address", label: "כתובת מגורים מלאה (רחוב, מס' בית, עיר, מיקוד)", type: "text", required: true, placeholder: "פייר קניג 12, ירושלים" },
+      { id: "maritalStatus", label: "מצב משפחתי", type: "select", options: ["רווק/ה", "נשוי/ה", "גרוש/ה", "אלמן/ה"], required: true },
+      { id: "bankName", label: "שם הבנק", type: "select", options: ["בנק לאומי (10)", "בנק הפועלים (12)", "בנק דיסקונט (11)", "בנק מזרחי טפחות (20)", "הבנק הבינלאומי (31)", "בנק יהב (04)", "בנק מסד (46)", "בנק מרכנתיל (17)", "בנק הדואר (09)", "בנק וואן זירו (01)"], required: true },
+      { id: "bankBranch", label: "מספר סניף בנק", type: "text", required: true, placeholder: "למשל: 614" },
+      { id: "accountNumber", label: "מספר חשבון בנק", type: "text", required: true, placeholder: "למשל: 123456" },
+      { id: "idCardFile", label: "צילום תעודת זהות כולל ספח פתוח", type: "file", accept: "image/*,application/pdf", required: true, hint: "צלם מהטלפון או העלה קובץ סרוק" },
+      { id: "bankConfirmationFile", label: "אסמכתת בנק (צילום שיק מבוטל או אישור ניהול חשבון)", type: "file", accept: "image/*,application/pdf", required: true },
+      { 
+        id: "payslipConsent", 
+        label: "הריני מאשר/ת לקבל את תלוש השכר באמצעים אלקטרוניים (מייל). ידוע לי כי כל עוד לא חזרתי בי מהסכמתי, אני מוותר/ת על זכותי לקבל את תלוש השכר מודפס.", 
+        type: "checkbox", 
+        required: true 
+      },
+      { id: "signature", label: "חתימת העובד/ת", type: "signature", required: true }
+    ]
+  },
+  {
+    id: "form-police-helpless",
+    title: "2. בקשת בגיר לקבל אישור משטרה - אלימות כלפי חסרי ישע",
+    description: "טופס 1 לפי תקנות למניעת העסקה במוסדות מסוימים של מי שהורשע באלימות כלפי ילדים וחסרי ישע, תשפ\"ג-2023 (נשים וגברים)",
+    category: "בטחון ומשטרה",
+    required: true,
+    estimatedMinutes: 2,
+    icon: "FileBadge",
+    targetGender: "all",
+    fields: [
+      {
+        id: "helplessLawNotice",
+        label: "תקנות למניעת העסקה במוסדות מסוימים (תשפ\"ג-2023)",
+        type: "notice",
+        content: "אני הח\"מ מבקש/ת כי יינתן לי אישור משטרה לכך שאין מניעה לפי החוק להעסקתי במוסד: 'אודי מרילי פתרונות תעסוקה יצירתיים בע\"מ' (תעודת מוסד 2, מעון לילדים/חסרי ישע/מפעל מוגן/דיור מוגן). כמו כן, אני מייפה את כוחו של מנהל המוסד (אודי מרילי, ת.ז. 031933195) להגיש בקשה זו בשמי."
+      },
+      { id: "consentPoliceHelpless", label: "אני מאשר/ת ומבקש/ת קבלת אישור משטרה ומייפה את כוח המוסד להגישו בשמי", type: "checkbox", required: true },
+      { id: "policeHelplessFile", label: "העלאת אישור משטרה / אישור פנייה למשטרה לחסרי ישע", type: "file", accept: "image/*,application/pdf", required: true, hint: "חובה לצרף. במידה ואין ברשותך כרגע, יש להגיש בקשת אישור ליפעת" },
+      { id: "signature", label: "חתימת הבגיר/ה", type: "signature", required: true }
+    ]
+  },
+  {
+    id: "form-police-sexual-offenses",
+    title: "3. בקשת אישור משטרה - עברייני מין (גברים בלבד)",
+    description: "נספח א' - טופס 1 לפי החוק למניעת העסקה של עברייני מין במוסדות מסוימים, התשס\"א-2001 (חל על גברים בלבד)",
+    category: "בטחון ומשטרה",
+    required: true,
+    estimatedMinutes: 2,
+    icon: "ShieldCheck",
+    targetGender: "male",
+    fields: [
+      {
+        id: "sexOffenseLawNotice",
+        label: "הוראות החוק למניעת העסקת עברייני מין (גברים בלבד)",
+        type: "notice",
+        content: "אני החתום מטה מבקש כי יינתן לי אישור משטרה לכך שאין מניעה לפי החוק להעסקתי במוסד 'אודי מרילי' המצוין בטופס 2 המצורף. הנני מייפה את כוחו של מנהל התאגיד/מוסד (אודי מרילי) להגיש בקשה זו בשמי."
+      },
+      { id: "consentPoliceSexOffense", label: "אני מאשר ונותן ייפוי כוח לקבלת אישור משטרתי לעניין העדר עבירות מין", type: "checkbox", required: true },
+      { id: "policeSexOffenseFile", label: "העלאת אישור משטרה לעבירות מין (גברים בלבד)", type: "file", accept: "image/*,application/pdf", required: true, hint: "חובה לצרף. במידה ואין ברשותך כרגע, יש להגיש בקשת אישור ליפעת" },
+      { id: "signature", label: "חתימת המבקש", type: "signature", required: true }
+    ]
+  },
+  {
+    id: "form-confidentiality-welfare",
+    title: "4. התחייבות לשמירת סודיות - משרד הרווחה (נספח ב')",
+    description: "טופס הצהרה והתחייבות לשמירת סודיות בפיקוח אגף בכיר דיור, מינהל מוגבלויות, משרד הרווחה והביטחון החברתי",
+    category: "משפטי וסודיות",
+    required: true,
+    estimatedMinutes: 3,
+    icon: "Lock",
+    fields: [
+      {
+        id: "welfareNotice",
+        label: "עיקרי הצהרת הסודיות (סעיף 118 לחוק העונשין וחוק הגנת הפרטיות)",
+        type: "notice",
+        content: "המצוי/ה בפיקוח של אגף בכיר דיור, מינהל מוגבלויות, משרד הרווחה והביטחון החברתי, מתחייב/ת בזאת:\n1. לשמור בסודיות מלאה ומוחלטת כל ידיעה, מסמך, רשימה, תכנית או צילום מכל מידע המגיע לידיעתי במסגרת העבודה.\n2. לא להעביר, לגלות, למסור לאחר או לנצל כל מידע כנ\"ל.\n3. לנקוט בכל אמצעי הזהירות והאבטחה למניעת פגיעה בפרטיות של דיירי המערך והחוסים.\nידוע לי כי אי מילוי התחייבות זו מהווה עבירה לפי סעיף 118 לחוק העונשין, תשל\"ז-1977."
+      },
+      { id: "agreeWelfareConfidentiality", label: "קראתי, הבנתי ואני מתחייב/ת לשמור על סודיות מלאה כנדרש בחוק", type: "checkbox", required: true },
+      { id: "signature", label: "חתימת המצהיר/ה", type: "signature", required: true }
+    ]
+  },
+  {
+    id: "form-employment-contract",
+    title: "5. הסכם עבודה אישי - מדריך/ת דיור וסעיף 14",
+    description: "הסכם עבודה אישי באודי מרילי פתרונות תעסוקה יצירתיים בע\"מ כולל תנאי שכר, שעות וסעיף 14 לפיצויי פיטורים",
+    category: "הסכם העסקה",
+    required: true,
+    estimatedMinutes: 4,
+    icon: "FileText",
+    fields: [
+      {
+        id: "contractHighlights",
+        label: "תנאי ההסכם העיקריים",
+        type: "notice",
+        content: "מעסיק: אודי מרילי פתרונות תעסוקה יצירתיים בע\"מ (ח.פ 514024694, פייר קניג 37 ירושלים).\nהגדרת התפקיד: מדריך/ה | ממונה ישיר: רכז/ת דירה.\nשכר עבודה: שכר בסיס שעתי של 35.40 ₪ ברוטו לשעה.\nמועד תשלום: לא יאוחר מה-9 לחודש העוקב.\nהפרשות סוציאליות: פנסיה ופיצויים בהתאם לצו ההרחבה ונוסח הצו הכללי לפי סעיף 14 לחוק פיצויי פיטורים (נספח א').\nזכאות לדמי הבראה, חופשה שנתית, דמי מחלה והחזר נסיעות עפ\"י חוק."
+      },
+      { id: "assignedApartment", label: "שם הדירה / מערך הדיור המשויך", type: "text", required: true, placeholder: "למשל: דירת בית הכרם / יד חרוצים" },
+      { id: "agreeContractTerms", label: "קראתי ואני מסכים/ה לכל תנאי הסכם העבודה ונספח סעיף 14 המצורף", type: "checkbox", required: true },
+      { id: "signature", label: "חתימת העובד/ת על הסכם העבודה", type: "signature", required: true }
+    ]
+  },
+  {
+    id: "form-health-and-docs",
+    title: "6. אישור רפואי, קורות חיים ותעודות מקצועיות",
+    description: "העלאת אישור רפואי מרופא משפחה, קורות חיים עדכניים ותעודת עו\"ס (במידה ורלוונטי)",
+    category: "בריאות ומסמכים",
+    required: true,
+    estimatedMinutes: 3,
+    icon: "HeartPulse",
+    fields: [
+      { id: "medicalFitnessStatement", label: "הנני מצהיר/ה כי מצב בריאותי תקין ומאפשר לי לבצע את התפקיד במלואו", type: "checkbox", required: true },
+      { id: "medicalDoctorCertFile", label: "העלאת אישור רפואי מרופא משפחה המאשר כשירות לעבודה", type: "file", accept: "image/*,application/pdf", required: true, hint: "צילום אישור כשירות מרופא משפחה" },
+      { id: "resumeFile", label: "העלאת קורות חיים עדכניים", type: "file", accept: "image/*,application/pdf,.doc,.docx", required: true },
+      { id: "isSocialWorker", label: "האם התפקיד הוא עובד/ת סוציאלי/ת?", type: "select", options: ["לא", "כן"], required: true },
+      { id: "socialWorkerCertFile", label: "לעו\"ס בלבד: תעודת רישום בפנקס העו\"ס ואישור זכאות לתואר", type: "file", accept: "image/*,application/pdf", required: false, hint: "חובה רק עבור עובדים סוציאליים" },
+      { id: "signature", label: "חתימת העובד/ת", type: "signature", required: true }
+    ]
+  },
+  {
+    id: "form-pension-and-tax",
+    title: "7. קופת פנסיה, תיאום מס ותיאום ביטוח לאומי",
+    description: "הצהרה על קרן פנסיה קיימת (טופס קוביות) או ברירת מחדל, ותיאום מס/ביטוח לאומי לעבודה נוספת",
+    category: "פנסיה ומיסוי",
+    required: true,
+    estimatedMinutes: 3,
+    icon: "Receipt",
+    fields: [
+      { id: "hasActivePension", label: "האם קיימת על שמך קופת פנסיה פעילה?", type: "select", options: ["כן - יש לי קופה פעילה (אצרף טופס קוביות)", "לא - אני מעוניין/ת להצטרף לקרן פנסיה ברירת מחדל של המעסיק"], required: true },
+      { id: "pensionFundName", label: "במידה ויש קופה פעילה - שם חברת הביטוח / קרן הפנסיה", type: "text", required: false, placeholder: "למשל: מנורה מבטחים, הראל, מגדל, כלל, הפניקס" },
+      { id: "pensionFormFile", label: "צילום טופס קוביות / אישור בעלות מקופת הפנסיה", type: "file", accept: "image/*,application/pdf", required: false, hint: "טופס קוביות מחברת הביטוח כולל שם מדויק, קוד קופה ופרטי חשבון הבנק של הקופה" },
+      { id: "hasOtherJob", label: "האם יש לך עבודה נוספת / קצבה נוספת?", type: "select", options: ["אין עבודה נוספת - זוהי משרתי היחידה והעיקרית", "יש עבודה נוספת (נדרש תיאום מס ותיאום ביטוח לאומי)"], required: true },
+      {
+        id: "taxCoordNotice",
+        label: "הנחיה לתיאום מס וביטוח לאומי",
+        type: "notice",
+        content: "במידה וישנה עבודה נוספת או קצבה, יש לערוך תיאום מס מול רשות המסים ותיאום ביטוח לאומי עבור מספר תיק ניכויים: 941707242 (אודי מרילי פתרונות תעסוקה יצירתיים בע\"מ)."
+      },
+      { id: "taxCoordFile", label: "אישור תיאום מס (אם קיים)", type: "file", accept: "image/*,application/pdf", required: false },
+      { id: "signature", label: "אישור וחתימת העובד/ת", type: "signature", required: true }
+    ]
+  },
+  {
+    id: "form-101-digital",
+    title: "8. כרטיס עובד וטופס 101 מקוון לשנת המס 2026",
+    description: "טופס 101 רשמי - פרטי המעסיק: אודי מרילי, תיק ניכויים 941707242, שנת מס 2026",
+    category: "טופס 101 ושכר",
+    required: true,
+    estimatedMinutes: 4,
+    icon: "Receipt",
+    fields: [
+      { id: "taxYear", label: "שנת המס", type: "text", required: true, defaultValue: "2026" },
+      { id: "employerName", label: "שם המעסיק", type: "text", required: true, defaultValue: "אודי מרילי - פתרונות תעסוקה יצירתיים בע\"מ" },
+      { id: "employerTaxFile", label: "מספר תיק ניכויים", type: "text", required: true, defaultValue: "941707242" },
+      { id: "isIsraeliResident", label: "האם הינך תושב/ת ישראל?", type: "select", options: ["כן", "לא"], required: true },
+      { id: "otherIncomeType", label: "פרטים על הכנסות אחרות", type: "select", options: ["אין לי כלל הכנסות אחרות ממשכורת או מקצבה", "יש לי הכנסות נוספות - עבודה נוספת", "יש לי הכנסה מקצבת פרישה"], required: true },
+      { id: "childrenUnder18Count", label: "מספר ילדים שטרם מלאו להם 18 שנים בשנת המס", type: "number", required: true, defaultValue: "0" },
+      { id: "isSingleParent", label: "האם הנך הורה יחידני / מנהל/ת משק בית בנפרד?", type: "select", options: ["לא", "כן"], required: true },
+      { id: "declaration101", label: "אני מצהיר/ה כי כל הפרטים שמסרתי בטופס זה הינם מלאים ונכונים. ידוע לי כי השמטה או מסירת פרטים לא נכונים הינה עבירה על פקודת מס הכנסה.", type: "checkbox", required: true },
+      { id: "signature", label: "חתימת העובד/ת על טופס 101", type: "signature", required: true }
+    ]
+  }
+];
+
+export const defaultEmployees = [
+  {
+    id: "emp-101",
+    token: "tok-dana-789",
+    fullName: "דנה כהן-אזולאי",
+    gender: "אישה",
+    idNumber: "204859612",
+    phone: "050-7845123",
+    email: "dana.azoulay@gmail.com",
+    role: "מדריכת דיור",
+    department: "מערך דיור - ירושלים",
+    hireDate: "2026-11-01",
+    status: "completed",
+    progress: 100,
+    formsCount: 7,
+    completedFormsCount: 7,
+    submittedAt: "2026-11-02 14:35",
+    submissions: {
+      "form-personal-bank": {
+        fullName: "דנה כהן-אזולאי",
+        gender: "אישה",
+        idNumber: "204859612",
+        birthDate: "1994-06-15",
+        phone: "050-7845123",
+        email: "dana.azoulay@gmail.com",
+        address: "פייר קניג 18, ירושלים",
+        maritalStatus: "נשוי/ה",
+        bankName: "בנק לאומי (10)",
+        bankBranch: "800",
+        accountNumber: "458712",
+        idCardFile: "/uploads/sample-id.png",
+        bankConfirmationFile: "/uploads/sample-bank.png",
+        payslipConsent: true,
+        signature: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><path d='M20,40 Q60,10 100,35 T180,25' stroke='%231e3a8a' stroke-width='3' fill='none'/></svg>",
+        signedAt: "2026-11-02 14:10"
+      },
+      "form-police-helpless": {
+        consentPoliceHelpless: true,
+        policeHelplessFile: "/uploads/sample-police.png",
+        signature: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><path d='M20,40 Q60,10 100,35 T180,25' stroke='%231e3a8a' stroke-width='3' fill='none'/></svg>",
+        signedAt: "2026-11-02 14:15"
+      },
+      "form-confidentiality-welfare": {
+        agreeWelfareConfidentiality: true,
+        signature: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><path d='M20,40 Q60,10 100,35 T180,25' stroke='%231e3a8a' stroke-width='3' fill='none'/></svg>",
+        signedAt: "2026-11-02 14:18"
+      },
+      "form-employment-contract": {
+        assignedApartment: "דירת בית הכרם 4",
+        agreeContractTerms: true,
+        signature: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><path d='M20,40 Q60,10 100,35 T180,25' stroke='%231e3a8a' stroke-width='3' fill='none'/></svg>",
+        signedAt: "2026-11-02 14:22"
+      },
+      "form-health-and-docs": {
+        medicalFitnessStatement: true,
+        medicalDoctorCertFile: "/uploads/sample-medical.png",
+        resumeFile: "/uploads/sample-id.png",
+        isSocialWorker: "לא",
+        signature: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><path d='M20,40 Q60,10 100,35 T180,25' stroke='%231e3a8a' stroke-width='3' fill='none'/></svg>",
+        signedAt: "2026-11-02 14:26"
+      },
+      "form-pension-and-tax": {
+        hasActivePension: "כן - יש לי קופה פעילה (אצרף טופס קוביות)",
+        pensionFundName: "מנורה מבטחים פנסיה",
+        pensionFormFile: "/uploads/sample-bank.png",
+        hasOtherJob: "אין עבודה נוספת - זוהי משרתי היחידה והעיקרית",
+        signature: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><path d='M20,40 Q60,10 100,35 T180,25' stroke='%231e3a8a' stroke-width='3' fill='none'/></svg>",
+        signedAt: "2026-11-02 14:30"
+      },
+      "form-101-digital": {
+        taxYear: "2026",
+        employerName: "אודי מרילי - פתרונות תעסוקה יצירתיים בע\"מ",
+        employerTaxFile: "941707242",
+        isIsraeliResident: "כן",
+        otherIncomeType: "אין לי כלל הכנסות אחרות ממשכורת או מקצבה",
+        childrenUnder18Count: "2",
+        isSingleParent: "לא",
+        declaration101: true,
+        signature: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><path d='M20,40 Q60,10 100,35 T180,25' stroke='%231e3a8a' stroke-width='3' fill='none'/></svg>",
+        signedAt: "2026-11-02 14:35"
+      }
+    },
+    notes: "התיק שלם, כל המסמכים תקינים ומאומתים לפי צ'קליסט אודי מרילי."
+  },
+  {
+    id: "emp-102",
+    token: "tok-roey-451",
+    fullName: "רועי לוי",
+    gender: "גבר",
+    idNumber: "312984562",
+    phone: "054-6129988",
+    email: "roey.levi@gmail.com",
+    role: "מדריך דיור",
+    department: "מערך דיור - ירושלים",
+    hireDate: "2026-11-05",
+    status: "in_progress",
+    progress: 63,
+    formsCount: 8,
+    completedFormsCount: 5,
+    submittedAt: "2026-11-03 10:15",
+    submissions: {
+      "form-personal-bank": {
+        fullName: "רועי לוי",
+        gender: "גבר",
+        idNumber: "312984562",
+        birthDate: "1998-02-20",
+        phone: "054-6129988",
+        email: "roey.levi@gmail.com",
+        address: "העצמאות 8, ירושלים",
+        maritalStatus: "רווק/ה",
+        bankName: "בנק הפועלים (12)",
+        bankBranch: "650",
+        accountNumber: "983112",
+        idCardFile: "/uploads/sample-id.png",
+        bankConfirmationFile: "/uploads/sample-bank.png",
+        payslipConsent: true,
+        signature: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><path d='M30,30 C70,10 90,60 170,20' stroke='%231e3a8a' stroke-width='3' fill='none'/></svg>",
+        signedAt: "2026-11-03 09:50"
+      },
+      "form-police-helpless": {
+        consentPoliceHelpless: true,
+        policeHelplessFile: "/uploads/sample-police.png",
+        signature: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><path d='M30,30 C70,10 90,60 170,20' stroke='%231e3a8a' stroke-width='3' fill='none'/></svg>",
+        signedAt: "2026-11-03 10:00"
+      },
+      "form-police-sexual-offenses": {
+        consentPoliceSexOffense: true,
+        policeSexOffenseFile: "/uploads/sample-police.png",
+        signature: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><path d='M30,30 C70,10 90,60 170,20' stroke='%231e3a8a' stroke-width='3' fill='none'/></svg>",
+        signedAt: "2026-11-03 10:05"
+      },
+      "form-confidentiality-welfare": {
+        agreeWelfareConfidentiality: true,
+        signature: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><path d='M30,30 C70,10 90,60 170,20' stroke='%231e3a8a' stroke-width='3' fill='none'/></svg>",
+        signedAt: "2026-11-03 10:10"
+      },
+      "form-employment-contract": {
+        assignedApartment: "דירת הגבעה הצרפתית",
+        agreeContractTerms: true,
+        signature: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><path d='M30,30 C70,10 90,60 170,20' stroke='%231e3a8a' stroke-width='3' fill='none'/></svg>",
+        signedAt: "2026-11-03 10:15"
+      }
+    },
+    notes: "נותר למלא אישור רפואי + פנסיה וטופס 101."
+  },
+  {
+    id: "emp-103",
+    token: "tok-shira-992",
+    fullName: "שירה אלבז",
+    gender: "אישה",
+    idNumber: "038765432",
+    phone: "052-8901234",
+    email: "shira.elbaz@outlook.com",
+    role: "עובדת סוציאלית (עו\"ס)",
+    department: "טיפול ושיקום",
+    hireDate: "2026-11-10",
+    status: "not_started",
+    progress: 0,
+    formsCount: 7,
+    completedFormsCount: 0,
+    submittedAt: null,
+    submissions: {},
+    notes: "נשלח קישור ישיר לוואטסאפ"
+  },
+  {
+    id: "emp-104",
+    token: "tok-yossi-331",
+    fullName: "יוסף (יוסי) ברקוביץ",
+    gender: "גבר",
+    idNumber: "029871654",
+    phone: "054-4433221",
+    email: "yossi.berko@gmail.com",
+    role: "רכז דירה",
+    department: "מערך דיור - ירושלים",
+    hireDate: "2026-11-01",
+    status: "approved",
+    progress: 100,
+    formsCount: 8,
+    completedFormsCount: 8,
+    submittedAt: "2026-11-01 16:40",
+    submissions: {
+      "form-personal-bank": { fullName: "יוסף ברקוביץ", gender: "גבר", idNumber: "029871654", phone: "054-4433221", payslipConsent: true },
+      "form-police-helpless": { consentPoliceHelpless: true },
+      "form-police-sexual-offenses": { consentPoliceSexOffense: true },
+      "form-confidentiality-welfare": { agreeWelfareConfidentiality: true },
+      "form-employment-contract": { assignedApartment: "דירת קטמון", agreeContractTerms: true },
+      "form-health-and-docs": { medicalFitnessStatement: true },
+      "form-pension-and-tax": { hasActivePension: "לא - ברירת מחדל", hasOtherJob: "אין" },
+      "form-101-digital": { taxYear: "2026", isIsraeliResident: "כן", declaration101: true }
+    },
+    notes: "אושר במלואו ע\"י יפעת אודי מרילי. הועבר להנהלת חשבונות."
+  }
+];

@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: easyhire-onboarding
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    disk:
+      name: easyhire-data
+      mountPath: /opt/render/project/src/server/uploads
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
