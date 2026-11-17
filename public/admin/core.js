@@ -242,12 +242,13 @@ async function pipelineView() {
   q.addEventListener('input', draw); fd.addEventListener('input', draw); draw();
   const filterBy = (s) => () => { flt.s = flt.s === s ? '' : s; pipelineView(); };
   const cap = cfg.capacity, appr = n('approved');
-  shell({ title: 'לוח קליטה', sub: 'מעקב חי אחר מילוי טפסים, חתימות ואישורים',
+  shell({ title: 'לוח קליטה', sub: (me.department ? 'דירה / מסגרת: ' + me.department + ' · ' : '') + 'מעקב חי אחר מילוי טפסים, חתימות ואישורים',
     actions: [
       $e('button', { class: 'btn ghost hdr', icon: 'save', title: 'גיבוי ושמירת כל הנתונים לענן ולמחשב', onclick: guard(async (ev) => {
         await busy(ev.currentTarget, () => api('/cloud-db/sync', 'POST').catch(() => {}));
         toast('כל הנתונים והקבצים נשמרו וגובו בענן ✓');
       }) }, $e('span', { class: 'bl', text: 'גיבוי / שמירה' })),
+      $e('button', { class: 'btn sec hdr', icon: 'megaphone', title: 'תזכורת אוטומטית חכמה למועמדים שטרם סיימו למלא טפסים', onclick: smartRemindersModal }, $e('span', { class: 'bl', text: 'תזכורת לממתינים' })),
       $e('button', { class: 'btn sec hdr', icon: 'link', title: 'העתקת קישור ההרשמה למועמדים', onclick: () => copy(location.origin + '/apply') }, $e('span', { class: 'bl', text: 'קישור הרשמה' })),
       newBtn()
     ] },
@@ -274,6 +275,29 @@ function linkModal(e) {
       e.phone ? $e('a', { class: 'btn sec', href: waLink(e), target: '_blank', rel: 'noopener', icon: 'whatsapp', text: 'וואטסאפ' }) : null,
       mailto(e.email) ? $e('a', { class: 'btn sec', href: mailto(e.email, '?subject=' + encodeURIComponent('טפסי קליטה') + '&body=' + encodeURIComponent('שלום, אנא מלאו את טפסי הקליטה בקישור:\n' + url)), icon: 'mail', text: 'מייל' }) : null,
       $e('span', { class: 'sp' }), $e('button', { class: 'btn ghost', text: 'סגירה', onclick: () => m.remove() }))));
+}
+
+// תזכורות חכמות למועמדים שנתקעו באמצע מילוי ("נדנוד חכם" עם פירוט מדויק של הטפסים החסרים)
+async function smartRemindersModal() {
+  const items = await api('/employees/reminders');
+  const waReminderUrl = (r) => {
+    const first = (r.full_name || '').split(' ')[0];
+    const msg = `שלום ${first},\nתזכורת מאודי מרילי: השלמת עד כה ${r.done} מתוך ${r.total} טפסי קליטה.\n\nהטפסים שנותרו להשלמה:\n• ${r.missing.join('\n• ')}\n\nלהמשך מילוי מהיר מאותה נקודה לחצו על הקישור האישי:\n${empUrl(r.token)}`;
+    return 'https://wa.me/' + waPhone(r.phone) + '?text=' + encodeURIComponent(msg);
+  };
+  const rows = items.map((r) => $e('div', { class: 'exrow', style: 'align-items:flex-start' },
+    $e('div', { style: 'flex:1;min-width:220px' },
+      who(r.full_name, (r.department ? r.department + ' · ' : '') + 'השלים/ה ' + r.done + '/' + r.total + ' טפסים'),
+      $e('div', { style: 'margin-top:6px;font-size:.84rem;color:var(--warn)' }, 'חסרים (' + r.missing.length + '): ' + r.missing.join(' · '))),
+    $e('div', { class: 'row', style: 'gap:6px' },
+      r.phone ? $e('a', { class: 'btn okb sm', href: waReminderUrl(r), target: '_blank', rel: 'noopener', icon: 'whatsapp', text: 'תזכורת חכמה בוואטסאפ' }) : null,
+      $e('button', { class: 'btn ghost sm', icon: 'eye', text: 'תיק', onclick: () => { m.remove(); employeeDetail(r.id); } }))));
+  const m = modal($e('div', {},
+    $e('h2', { icon: 'megaphone', text: 'תזכורת חכמה למועמדים בתהליך (' + items.length + ')' }),
+    $e('p', { class: 'muted', style: 'margin-top:0', text: 'המערכת מזהה אוטומטית אילו טפסים בדיוק חסרים לכל מועמד, ומכינה הודעת וואטסאפ אישית עם רשימת הטפסים החסרים והקישור האישי להמשך מילוי.' }),
+    rows.length ? $e('div', { style: 'max-height:420px;overflow:auto' }, rows) : empty('checkCircle', 'כל המועמדים השלימו את כל הטפסים!'),
+    $e('div', { class: 'row', style: 'margin-top:16px;justify-content:flex-end' },
+      $e('button', { class: 'btn ghost', text: 'סגירה', onclick: () => m.remove() }))), true);
 }
 
 const empForm = (e) => {
@@ -582,7 +606,8 @@ async function settingsView() {
     company_name: inp('company_name', '', 'text', 'rtl'), company_line: inp('company_line', '', 'text', 'rtl'), capacity: inp('capacity', '180', 'number') };
   const apply = $e('input', { type: 'checkbox' }); apply.checked = s.apply_enabled;
   const pw = { current: $e('input', { type: 'password' }), next: $e('input', { type: 'password' }) };
-  const nu = { username: $e('input', { type: 'text', dir: 'ltr', placeholder: 'שם משתמש (אנגלית)' }), name: $e('input', { type: 'text', placeholder: 'שם מלא' }), password: $e('input', { type: 'password', dir: 'ltr', placeholder: 'סיסמה (8+ תווים)' }) };
+  const nu = { username: $e('input', { type: 'text', dir: 'ltr', placeholder: 'שם משתמש (אנגלית)' }), name: $e('input', { type: 'text', placeholder: 'שם מלא' }), password: $e('input', { type: 'password', dir: 'ltr', placeholder: 'סיסמה (8+ תווים)' }), department: $e('input', { type: 'text', placeholder: 'דירה/מסגרת (השאירו ריק לגישה לכל החברה)', list: 'deptlist_u' }) };
+  const allDepts = [...new Set(list.map((x) => x.department).filter(Boolean))];
   const ghTok = $e('input', { type: 'password', dir: 'ltr', placeholder: cdb.configured ? '•••••••• (מחובר ופעיל! השאירו ריק או הזינו טוקן חדש)' : 'הדביקו כאן GitHub Token (מתחיל ב-ghp_)', disabled: !!cdb.env_token });
   const impFile = $e('input', { type: 'file', accept: '.db,.enc', style: 'display:none', onchange: guard(async () => {
     const file = impFile.files[0]; if (!file) return;
@@ -627,12 +652,16 @@ async function settingsView() {
         $e('label', { class: 'checks', style: 'display:flex;gap:8px;margin-top:14px;align-items:center' }, apply, 'לאפשר הרשמה עצמית של מועמדים בקישור /apply'),
         $e('div', { class: 'row', style: 'margin-top:18px' }, $e('button', { class: 'btn', text: 'שמירת הגדרות', onclick: save }),
           $e('button', { class: 'btn sec', icon: 'send', text: 'מייל בדיקה', onclick: guard(async () => { await save(); await api('/settings/test-mail', 'POST'); toast('מייל הבדיקה נשלח ✓'); }) }))),
-      $e('div', { class: 'card' }, $e('h3', { icon: 'users', text: 'משתמשי מערכת (צוות משאבי אנוש)' }),
-        $e('p', { class: 'muted', style: 'margin-top:0', text: 'כל משתמש נכנס עם שם וסיסמה משלו, וכולם עובדים במקביל על אותם נתונים.' }),
-        users.map((u) => $e('div', { class: 'rrow' }, avatar(u.name || u.username), $e('div', { class: 'tx' }, $e('b', { text: u.name || u.username }), $e('small', { text: u.username })),
+      $e('div', { class: 'card' }, $e('h3', { icon: 'users', text: 'משתמשי מערכת והרשאות לפי דירה / מסגרת' }),
+        $e('p', { class: 'muted', style: 'margin-top:0', text: 'ניתן להגדיר משתמש עם גישה מלאה לכל החברה (משאבי אנוש / הנהלה) או להגביל רכז/ת דירה לצפייה רק בעובדי הדירה/מסגרת שלו.' }),
+        users.map((u) => $e('div', { class: 'rrow' }, avatar(u.name || u.username),
+          $e('div', { class: 'tx' }, $e('b', { text: u.name || u.username }), $e('small', { text: u.username + ' · ' + (u.department ? 'דירה/מסגרת: ' + u.department : 'גישה מלאה לכל החברה') })),
+          u.department ? $e('span', { class: 'chip pri', text: u.department }) : $e('span', { class: 'chip ok', text: 'כל החברה' }),
           u.username === me.username ? $e('span', { class: 'chip gray', text: 'אתם' }) : $e('button', { class: 'btn ghost sm', text: 'הסרה', onclick: guard(async () => { if (confirm('להסיר את המשתמש?')) { await api('/users/' + u.id, 'DELETE'); settingsView(); } }) }))),
-        $e('h4', { style: 'margin:18px 0 8px', text: 'הוספת משתמש' }), $e('div', { class: 'row' }, nu.username, nu.name, nu.password),
-        $e('button', { class: 'btn', style: 'margin-top:12px', text: 'הוספה', onclick: guard(async () => { await api('/users', 'POST', { username: nu.username.value, name: nu.name.value, password: nu.password.value }); toast('המשתמש נוסף ✓'); settingsView(); }) })),
+        $e('h4', { style: 'margin:18px 0 8px', text: 'הוספת משתמש / רכז דירה' }),
+        $e('div', { class: 'row', style: 'flex-wrap:wrap;gap:8px' }, nu.username, nu.name, nu.password, nu.department),
+        $e('datalist', { id: 'deptlist_u' }, allDepts.map((d) => $e('option', { value: d }))),
+        $e('button', { class: 'btn', style: 'margin-top:12px', text: 'הוספת משתמש', onclick: guard(async () => { await api('/users', 'POST', { username: nu.username.value, name: nu.name.value, password: nu.password.value, department: nu.department.value }); toast('המשתמש נוסף ✓'); settingsView(); }) })),
       $e('div', { class: 'card' }, $e('h3', { icon: 'lock', text: 'החלפת סיסמה' }), row('סיסמה נוכחית', pw.current), row('סיסמה חדשה (8+ תווים)', pw.next),
         $e('button', { class: 'btn', style: 'margin-top:14px', text: 'עדכון', onclick: guard(async () => { await api('/password', 'POST', { current: pw.current.value, next: pw.next.value }); pw.current.value = pw.next.value = ''; toast('הסיסמה עודכנה ✓'); }) })),
       $e('div', { class: 'card' }, $e('h3', { icon: 'file', text: 'הצעת מחיר לתחזוקה שוטפת ותמיכה' }),

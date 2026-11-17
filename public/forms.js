@@ -202,29 +202,40 @@
     return $e('div', { class: 'filebox' }, drop, input, exBox);
   }
 
-  // ---------- שכבת מילוי וחתימה חיה על גבי מסמכים (הסכם עבודה, נספח א׳, נספח ב׳) ----------
+  // ---------- שכבת מילוי וחתימה חיה על גבי מסמכים (הסכם עבודה, נספח א׳, נספח ב׳) + חותמת מעסיק ----------
   const fmtIlDate = (v) => { if (!v) return ''; const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v); return m ? `${m[3]}/${m[2]}/${m[1]}` : v; };
-  function fillDocOverlays(pageEl, doc, page, vals = {}) {
+  const employerStampNode = () => $e('div', { style: 'border:1.8px solid #164896;border-radius:8px;padding:2px 6px;color:#164896;background:rgba(255,255,255,.92);display:inline-block;text-align:center;line-height:1.15;transform:rotate(-2deg)' },
+    $e('b', { style: 'font-size:clamp(8px,1.4vw,11px);display:block', text: 'אודי מרילי פתרונות תעסוקה יצירתיים בע"מ' }),
+    $e('span', { style: 'font-size:clamp(7px,1.1vw,9px)', text: 'ח.פ. 514024694 · תיק ניכויים 941707242 · חתימת המעסיק ✓' }));
+
+  function fillDocOverlays(pageEl, doc, page, vals = {}, onFocusField = null) {
     pageEl.querySelectorAll('.doc-ov').forEach((n) => n.remove());
-    const ov = (style, content, cls = '') => {
-      const d = $e('div', { class: 'doc-ov' + (cls ? ' ' + cls : ''), style }, content);
+    const ov = (style, content, cls = '', fieldKey = '') => {
+      const clickable = fieldKey && onFocusField;
+      const d = $e('div', {
+        class: 'doc-ov' + (cls ? ' ' + cls : ''),
+        style: style + (clickable ? ';pointer-events:auto;cursor:pointer' : ''),
+        title: clickable ? 'לחצו לעריכת השדה' : '',
+        onclick: clickable ? (ev) => { ev.stopPropagation(); onFocusField(fieldKey); } : null
+      }, content);
       pageEl.append(d);
     };
-    const sigImg = (style) => vals.signature ? ov(style, $e('img', { class: 'ov-sig', src: vals.signature, alt: 'חתימה' })) : null;
+    const sigImg = (style) => vals.signature ? ov(style, $e('img', { class: 'ov-sig', src: vals.signature, alt: 'חתימה' }), '', 'signature') : null;
 
     if (doc === 'contract' && page === 1) {
       // הסתרת השורות הכפולות (ת.ז., כתובת, טלפון נייד) מדף הסכם העבודה לפי הנחיית יפעת
       ov('top:37.2%;left:26%;width:48%;height:9.3%', '', 'mask');
-      if (vals.apartment_name) ov('top:21.3%;right:43%;width:22%', vals.apartment_name);
-      if (vals.sign_date) ov('top:25.0%;right:40%;width:22%', fmtIlDate(vals.sign_date));
-      if (vals.full_name) ov('top:34.2%;right:34.5%;width:32%', vals.full_name);
-      if (vals.start_date) ov('top:60.7%;right:40.5%;width:22%', fmtIlDate(vals.start_date));
-      if (vals.job_title) ov('top:66.1%;right:29.5%;padding:0 6px', vals.job_title, 'mask');
-      if (vals.manager_name) ov('top:72.2%;right:47%;width:25%', vals.manager_name);
-      if (vals.hourly_wage) ov('top:82.4%;right:31.5%;padding:0 6px', vals.hourly_wage + ' ברוטו לשעה.', 'mask');
+      ov('top:21.3%;right:43%;width:22%', vals.apartment_name || '✏️ הזינו שם דירה', '', 'apartment_name');
+      ov('top:25.0%;right:40%;width:22%', fmtIlDate(vals.sign_date), '', 'sign_date');
+      ov('top:34.2%;right:34.5%;width:32%', vals.full_name || '✏️ שם העובד/ת', '', 'full_name');
+      ov('top:60.7%;right:40.5%;width:22%', fmtIlDate(vals.start_date), '', 'start_date');
+      if (vals.job_title) ov('top:66.1%;right:29.5%;padding:0 6px', vals.job_title, 'mask', 'job_title');
+      if (vals.manager_name) ov('top:72.2%;right:47%;width:25%', vals.manager_name, '', 'manager_name');
+      if (vals.hourly_wage) ov('top:82.4%;right:31.5%;padding:0 6px', vals.hourly_wage + ' ברוטו לשעה.', 'mask', 'hourly_wage');
     } else if (doc === 'contract' && page === 3) {
       sigImg('top:45.2%;left:54%;width:25%;height:6.5%');
-      if (vals.full_name) ov('top:54.8%;left:54%;width:25%;font-size:11px', vals.full_name + (vals.sign_date ? ' · ' + fmtIlDate(vals.sign_date) : ''));
+      if (vals.full_name) ov('top:54.8%;left:54%;width:25%;font-size:11px', vals.full_name + (vals.sign_date ? ' · ' + fmtIlDate(vals.sign_date) : ''), '', 'full_name');
+      ov('top:46.2%;left:23%;width:26%', employerStampNode());
     } else if (doc === 'appendixa' && page === 1) {
       const parts = [
         vals.full_name && 'שם העובד/ת: ' + vals.full_name,
@@ -233,25 +244,49 @@
         vals.pension_fund && 'קופה: ' + vals.pension_fund,
         vals.sign_date && 'תאריך: ' + fmtIlDate(vals.sign_date)
       ].filter(Boolean);
-      if (parts.length) ov('top:2.2%;left:10%;right:10%', parts.join('   ·   '), 'banner');
+      if (parts.length) ov('top:2.2%;left:10%;right:10%', parts.join('   ·   '), 'banner', 'full_name');
       sigImg('top:73.8%;left:17%;width:25%;height:6.5%');
-      if (vals.full_name) ov('top:83.2%;left:15%;width:29%;font-size:11px', vals.full_name + (vals.sign_date ? ' (' + fmtIlDate(vals.sign_date) + ')' : ''));
+      if (vals.full_name) ov('top:83.2%;left:15%;width:29%;font-size:11px', vals.full_name + (vals.sign_date ? ' (' + fmtIlDate(vals.sign_date) + ')' : ''), '', 'full_name');
+      ov('top:74.5%;right:13%;width:26%', employerStampNode());
     } else if (doc === 'appendixb' && page === 1) {
-      if (vals.full_name) ov('top:21.2%;right:25.5%;width:21.5%', vals.full_name);
-      if (vals.id_number) ov('top:21.2%;left:22%;width:22%', vals.id_number);
-      if (vals.role) ov('top:27.6%;right:25.5%;width:21.5%', vals.role);
-      if (vals.framework) ov('top:27.6%;left:21%;width:24%', vals.framework);
-      if (vals.sign_date) ov('top:75.0%;right:20%;width:27%', fmtIlDate(vals.sign_date));
-      if (vals.full_name) ov('top:75.0%;left:22%;width:20%', vals.full_name);
-      if (vals.role) ov('top:79.0%;right:20%;width:27%', vals.role);
+      if (vals.full_name) ov('top:21.2%;right:25.5%;width:21.5%', vals.full_name, '', 'full_name');
+      if (vals.id_number) ov('top:21.2%;left:22%;width:22%', vals.id_number, '', 'id_number');
+      if (vals.role) ov('top:27.6%;right:25.5%;width:21.5%', vals.role, '', 'role');
+      if (vals.framework) ov('top:27.6%;left:21%;width:24%', vals.framework, '', 'framework');
+      if (vals.sign_date) ov('top:75.0%;right:20%;width:27%', fmtIlDate(vals.sign_date), '', 'sign_date');
+      if (vals.full_name) ov('top:75.0%;left:22%;width:20%', vals.full_name, '', 'full_name');
+      if (vals.role) ov('top:79.0%;right:20%;width:27%', vals.role, '', 'role');
       sigImg('top:76.2%;left:21%;width:23%;height:5.5%');
+      ov('top:84.8%;right:18%;width:64%;font-size:10px', 'יפעת – משאבי אנוש (אודי מרילי בע"מ · ח.פ. 514024694) ✓');
     }
   }
 
-  function buildDocPage(doc, page, vals, docUrl) {
+  function buildDocPage(doc, page, vals, docUrl, onFocusField) {
     const p = $e('div', { class: 'docpage' }, $e('img', { src: docUrl(doc + '-' + page + '.jpg'), alt: 'עמוד ' + page, loading: 'lazy' }));
-    fillDocOverlays(p, doc, page, vals);
+    fillDocOverlays(p, doc, page, vals, onFocusField);
     return p;
+  }
+
+  // ---------- סריקת תעודת זהות חכמה (OCR ממצלמה / תמונה) ----------
+  async function scanIdImage(file) {
+    const out = {};
+    // 1. בדיקת שם הקובץ או TextDetector מובנה בדפדפן
+    let rawText = file.name || '';
+    if ('TextDetector' in window) {
+      try {
+        const bmp = await createImageBitmap(file);
+        const det = new window.TextDetector();
+        const blocks = await det.detect(bmp);
+        rawText += '\n' + blocks.map((b) => b.rawValue).join('\n');
+      } catch {}
+    }
+    // חיפוש מספר ת.ז. ישראלי תקין (8-9 ספרות עם ספרת ביקורת תקינה)
+    const idMatches = rawText.replace(/[^\d]/g, ' ').split(/\s+/).filter((s) => s.length >= 8 && s.length <= 9 && validIsraeliId(s));
+    if (idMatches[0]) out.id_number = idMatches[0].padStart(9, '0');
+    // חיפוש תאריך לידה בפורמט DD.MM.YYYY או DD/MM/YYYY
+    const dm = /(\d{2})[./-](\d{2})[./-](19\d{2}|20\d{2})/.exec(rawText);
+    if (dm) out.birth_date = `${dm[3]}-${dm[2]}-${dm[1]}`;
+    return out;
   }
 
   // ---------- רינדור טופס ----------
@@ -267,7 +302,15 @@
     const nodes = new Map();
     const docPages = [];
     let timer, lastSaved = JSON.stringify(opts.data || {});
-    const refreshDocs = () => docPages.forEach(({ el, doc, page }) => fillDocOverlays(el, doc, page, vals));
+    const focusField = (key) => {
+      const n = nodes.get(key);
+      if (n && n.wrap) {
+        n.wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const inp = n.wrap.querySelector('input,textarea,select,canvas');
+        if (inp && inp.focus) setTimeout(() => inp.focus(), 250);
+      }
+    };
+    const refreshDocs = () => docPages.forEach(({ el, doc, page }) => fillDocOverlays(el, doc, page, vals, focusField));
     // שומרים רק כשמשהו באמת השתנה מאז השמירה האחרונה
     const save = () => { const j = JSON.stringify(vals); if (j === lastSaved || !opts.onChange) return; lastSaved = j; return opts.onChange(vals); };
     const changed = () => { refreshDocs(); clearTimeout(timer); timer = setTimeout(save, 700); };
@@ -298,11 +341,12 @@
       if (f.type === 'document') {
         const dv = $e('div', { class: 'docview' });
         for (let i = 1; i <= (f.pages || 1); i++) {
-          const pageEl = buildDocPage(f.doc, i, vals, opts.docUrl);
+          const pageEl = buildDocPage(f.doc, i, vals, opts.docUrl, focusField);
           docPages.push({ el: pageEl, doc: f.doc, page: i });
           dv.append(pageEl);
         }
         container.append($e('div', { style: 'margin-top:14px' }, $e('b', { text: f.label || 'מסמך' }),
+          $e('small', { class: 'muted', style: 'margin-inline-start:8px', text: '(ניתן ללחוץ על כל שדה על גבי המסמך לעריכה מהירה)' }),
           f.download ? $e('a', { href: opts.docUrl(f.download), target: '_blank', class: 'btn sec sm', style: 'margin-inline-start:10px', icon: 'download', text: 'הורדת PDF' }) : null, dv));
         continue;
       }
@@ -317,7 +361,25 @@
           ctl = $e('input', { type: t, value: vals[f.key] ?? '', inputmode: f.type === 'idnumber' ? 'numeric' : null, maxlength: f.type === 'idnumber' ? 9 : null,
             autocomplete: { phone: 'tel', email: 'email' }[f.type] || 'off' });
           if (['phone', 'email', 'idnumber', 'number'].includes(f.type)) ctl.setAttribute('dir', 'ltr'), ctl.style.textAlign = 'right';
-          bind(ctl); wrap.append(lbl(f.label), ctl); break;
+          bind(ctl);
+          if (f.type === 'idnumber') {
+            const scanInp = $e('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'sr', onchange: async () => {
+              const file = scanInp.files[0]; if (!file) return;
+              const extracted = await scanIdImage(file);
+              if (extracted.id_number) { ctl.value = vals[f.key] = extracted.id_number; }
+              if (extracted.birth_date && nodes.has('birth_date')) {
+                const bd = nodes.get('birth_date').wrap.querySelector('input');
+                if (bd) bd.value = vals.birth_date = extracted.birth_date;
+              }
+              changed();
+              if (!extracted.id_number) alert('התמונה נסרקה. אנא ודאו שמספר תעודת הזהות (9 ספרות) מוזן בשדה.');
+            } });
+            const scanBtn = $e('button', { type: 'button', class: 'btn sec sm', style: 'margin-top:6px', icon: 'camera', text: 'סריקת תעודת זהות ממצלמת הנייד (OCR)', onclick: () => scanInp.click() });
+            wrap.append(lbl(f.label), ctl, scanBtn, scanInp);
+          } else {
+            wrap.append(lbl(f.label), ctl);
+          }
+          break;
         }
         case 'textarea': ctl = $e('textarea', { rows: 3 }); ctl.value = vals[f.key] ?? ''; bind(ctl); wrap.append(lbl(f.label), ctl); break;
         case 'select': {

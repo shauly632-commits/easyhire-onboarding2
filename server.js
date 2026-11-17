@@ -64,6 +64,7 @@ if (addColumn('ALTER TABLE employees ADD COLUMN submitted_at TEXT')) {
 ['ALTER TABLE employees ADD COLUMN approved_at TEXT', 'ALTER TABLE employees ADD COLUMN approved_by TEXT',
   'ALTER TABLE assignments ADD COLUMN approved INTEGER DEFAULT 0', 'ALTER TABLE files ADD COLUMN approved INTEGER DEFAULT 0',
   'ALTER TABLE files ADD COLUMN content BLOB', 'ALTER TABLE templates ADD COLUMN attachment_content BLOB',
+  "ALTER TABLE users ADD COLUMN department TEXT DEFAULT ''",
   // עובדים פעילים: סטטוס העסקה והערות פנימיות
   "ALTER TABLE employees ADD COLUMN employment_status TEXT DEFAULT 'active'", "ALTER TABLE employees ADD COLUMN notes TEXT DEFAULT ''"].forEach(addColumn);
 
@@ -132,7 +133,7 @@ syncSeedTemplates();
 function getUser(req) {
   const m = /(?:^|;\s*)sid=([a-f0-9]+)/.exec(req.headers.cookie || '');
   if (!m) return null;
-  const s = db.prepare('SELECT s.sid,s.expires,u.id,u.username,u.name FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.sid=?').get(m[1]);
+  const s = db.prepare('SELECT s.sid,s.expires,u.id,u.username,u.name,u.department FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.sid=?').get(m[1]);
   if (!s || s.expires < Date.now()) return null;
   return s;
 }
@@ -325,6 +326,7 @@ const csvCell = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
 
 // ---------- חבילת טפסים (מייל / הדפסה מלאה כולל מסמכים מצורפים) ----------
 const fmtIlDate = (v) => { if (!v) return ''; const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v); return m ? `${m[3]}/${m[2]}/${m[1]}` : v; };
+const EMPLOYER_STAMP_HTML = `<div style="border:2px solid #164896;border-radius:8px;padding:3px 8px;color:#164896;background:rgba(255,255,255,.92);display:inline-block;text-align:center;line-height:1.15;transform:rotate(-2deg)"><b style="font-size:11px;display:block">אודי מרילי פתרונות תעסוקה יצירתיים בע"מ</b><span style="font-size:9px">ח.פ. 514024694 · תיק ניכויים 941707242 · חתימת המעסיק ✓</span></div>`;
 function renderDocOverlaysHtml(doc, page, vals = {}) {
   const ov = (style, text, extraCls = '') => `<div class="doc-ov ${extraCls}" style="${style}">${text}</div>`;
   const sigImg = (style) => vals.signature ? ov(style, `<img class="ov-sig" src="${vals.signature}" alt="חתימה">`) : '';
@@ -341,6 +343,7 @@ function renderDocOverlaysHtml(doc, page, vals = {}) {
   } else if (doc === 'contract' && page === 3) {
     out += sigImg('top:45.2%;left:54%;width:25%;height:6.5%');
     if (vals.full_name) out += ov('top:54.8%;left:54%;width:25%;font-size:11px', esc(vals.full_name + (vals.sign_date ? ' · ' + fmtIlDate(vals.sign_date) : '')));
+    out += ov('top:46.2%;left:23%;width:26%', EMPLOYER_STAMP_HTML);
   } else if (doc === 'appendixa' && page === 1) {
     const parts = [
       vals.full_name && 'שם העובד/ת: ' + vals.full_name,
@@ -352,6 +355,7 @@ function renderDocOverlaysHtml(doc, page, vals = {}) {
     if (parts.length) out += ov('top:2.2%;left:10%;right:10%', esc(parts.join('   ·   ')), 'banner');
     out += sigImg('top:73.8%;left:17%;width:25%;height:6.5%');
     if (vals.full_name) out += ov('top:83.2%;left:15%;width:29%;font-size:11px', esc(vals.full_name + (vals.sign_date ? ' (' + fmtIlDate(vals.sign_date) + ')' : '')));
+    out += ov('top:74.5%;right:13%;width:26%', EMPLOYER_STAMP_HTML);
   } else if (doc === 'appendixb' && page === 1) {
     if (vals.full_name) out += ov('top:21.2%;right:25.5%;width:21.5%', esc(vals.full_name));
     if (vals.id_number) out += ov('top:21.2%;left:22%;width:22%', esc(vals.id_number));
@@ -361,6 +365,7 @@ function renderDocOverlaysHtml(doc, page, vals = {}) {
     if (vals.full_name) out += ov('top:75.0%;left:22%;width:20%', esc(vals.full_name));
     if (vals.role) out += ov('top:79.0%;right:20%;width:27%', esc(vals.role));
     out += sigImg('top:76.2%;left:21%;width:23%;height:5.5%');
+    out += ov('top:84.8%;right:18%;width:64%;font-size:11px', 'יפעת – משאבי אנוש (אודי מרילי בע"מ · ח.פ. 514024694) ✓');
   }
   return out;
 }
@@ -522,7 +527,7 @@ route('POST', '/api/logout', async (req, res) => {
 });
 route('GET', '/api/me', async (req, res) => {
   const u = getUser(req);
-  send(res, 200, u ? { username: u.username, name: u.name, company: setting('company_name'), company_line: setting('company_line'), capacity: +setting('capacity') || 180 } : { anonymous: true });
+  send(res, 200, u ? { username: u.username, name: u.name, department: u.department || '', company: setting('company_name'), company_line: setting('company_line'), capacity: +setting('capacity') || 180 } : { anonymous: true });
 });
 route('POST', '/api/password', async (req, res) => {
   const u = requireUser(req); const b = await readBody(req);
@@ -533,7 +538,7 @@ route('POST', '/api/password', async (req, res) => {
   db.prepare('UPDATE users SET salt=?,hash=? WHERE id=?').run(salt, hashPw(b.next, salt), u.id);
   send(res, 200, { ok: true });
 });
-route('GET', '/api/users', async (req, res) => { requireUser(req); send(res, 200, db.prepare('SELECT id,username,name,created_at FROM users').all()); });
+route('GET', '/api/users', async (req, res) => { requireUser(req); send(res, 200, db.prepare('SELECT id,username,name,department,created_at FROM users').all()); });
 route('POST', '/api/users', async (req, res) => {
   requireUser(req); const b = await readBody(req);
   const un = String(b.username || '').trim();
@@ -541,7 +546,8 @@ route('POST', '/api/users', async (req, res) => {
   if (String(b.password || '').length < 8) throw new HttpError(400, 'סיסמה: לפחות 8 תווים');
   if (db.prepare('SELECT 1 FROM users WHERE username=?').get(un)) throw new HttpError(409, 'שם המשתמש תפוס');
   const salt = rand(16);
-  db.prepare('INSERT INTO users(username,name,salt,hash) VALUES(?,?,?,?)').run(un, String(b.name || un).slice(0, 80), salt, hashPw(b.password, salt));
+  const dept = String(b.department || '').trim().slice(0, 100);
+  db.prepare('INSERT INTO users(username,name,department,salt,hash) VALUES(?,?,?,?,?)').run(un, String(b.name || un).slice(0, 80), dept, salt, hashPw(b.password, salt));
   send(res, 200, { ok: true });
 });
 route('DELETE', '/api/users/(\\d+)', async (req, res, m) => {
@@ -646,10 +652,27 @@ route('GET', '/api/events', async (req, res) => {
 
 // employees (admin)
 route('GET', '/api/employees', async (req, res) => {
-  requireUser(req);
+  const u = requireUser(req);
   const mem = new Map();
   for (const r of db.prepare('SELECT employee_id,group_id FROM emp_group_members').all()) mem.set(r.employee_id, [...(mem.get(r.employee_id) || []), r.group_id]);
-  send(res, 200, db.prepare('SELECT * FROM employees WHERE archived=0 ORDER BY id DESC').all().map((e) => employeeRow(e, mem)));
+  const rows = u.department
+    ? db.prepare('SELECT * FROM employees WHERE archived=0 AND department=? ORDER BY id DESC').all(u.department)
+    : db.prepare('SELECT * FROM employees WHERE archived=0 ORDER BY id DESC').all();
+  send(res, 200, rows.map((e) => employeeRow(e, mem)));
+});
+// רשימת תזכורות חכמה למועמדים שטרם השלימו את כל הטפסים (נדנוד חכם עם פירוט מדויק של הטפסים החסרים)
+route('GET', '/api/employees/reminders', async (req, res) => {
+  const u = requireUser(req);
+  const rows = u.department
+    ? db.prepare('SELECT * FROM employees WHERE archived=0 AND approved_at IS NULL AND submitted_at IS NULL AND department=? ORDER BY id DESC').all(u.department)
+    : db.prepare('SELECT * FROM employees WHERE archived=0 AND approved_at IS NULL AND submitted_at IS NULL ORDER BY id DESC').all();
+  const out = rows.map((e) => {
+    const as = db.prepare('SELECT a.status, t.title FROM assignments a JOIN templates t ON t.id=a.template_id WHERE a.employee_id=? ORDER BY t.position,t.id').all(e.id);
+    const missing = as.filter((a) => a.status !== 'submitted').map((a) => a.title);
+    const done = as.length - missing.length;
+    return { id: e.id, full_name: e.full_name, phone: e.phone, email: e.email, department: e.department, token: e.token, done, total: as.length, missing };
+  }).filter((x) => x.missing.length > 0);
+  send(res, 200, out);
 });
 const empFields = (b) => [String(b.full_name || '').trim().slice(0, 100), String(b.id_number || '').replace(/\D/g, '').slice(0, 9), b.gender === 'male' || b.gender === 'female' ? b.gender : '',
   String(b.phone || '').slice(0, 30), String(b.email || '').slice(0, 100), String(b.job_title || '').slice(0, 100), String(b.department || '').slice(0, 100),
