@@ -196,7 +196,7 @@ module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, require
     return patchRes.ok;
   }
 
-  // שמירה לענן (GitHub branch: data-backup)
+  // שמירה לענן (GitHub branch: data-backup) באמצעות Git Blobs/Trees API (תומך עד 100MB של קבצים ומסמכים!)
   async function pushToCloudNow() {
     const token = getToken();
     if (!token) return { ok: false, reason: 'no_token' };
@@ -206,32 +206,52 @@ module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, require
       const repo = getRepo(), branch = getBranch();
       await ensureBackupBranch(repo, branch);
 
-      // בדיקת SHA קיים של קובץ הגיבוי בענף data-backup
-      let existingSha = undefined;
-      const curRes = await ghFetch(`/repos/${repo}/contents/easyhire-db.enc?ref=${encodeURIComponent(branch)}`);
-      if (curRes.status === 200) {
-        const curJson = await curRes.json();
-        existingSha = curJson.sha;
-      }
-
       const syncTs = now();
       putSetting('cloud_last_sync', syncTs);
       const snapBuf = createSnapshotBuffer();
       const encBuf = encryptBuffer(snapBuf);
-      const putRes = await ghFetch(`/repos/${repo}/contents/easyhire-db.enc`, {
-        method: 'PUT',
+
+      const refRes = await ghFetch(`/repos/${repo}/git/ref/heads/${branch}`);
+      if (!refRes.ok) throw new Error(`Branch ${branch} not ready (${refRes.status})`);
+      const baseCommitSha = (await refRes.json()).object.sha;
+
+      const blobRes = await ghFetch(`/repos/${repo}/git/blobs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: encBuf.toString('base64'), encoding: 'base64' })
+      });
+      if (!blobRes.ok) throw new Error(`GitHub Blob HTTP ${blobRes.status}`);
+      const blobSha = (await blobRes.json()).sha;
+
+      const treeRes = await ghFetch(`/repos/${repo}/git/trees`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tree: [{ path: 'easyhire-db.enc', mode: '100644', type: 'blob', sha: blobSha }]
+        })
+      });
+      if (!treeRes.ok) throw new Error(`GitHub Tree HTTP ${treeRes.status}`);
+      const newTreeSha = (await treeRes.json()).sha;
+
+      const commitRes = await ghFetch(`/repos/${repo}/git/commits`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: `Cloud DB auto-backup (${syncTs})`,
-          content: encBuf.toString('base64'),
-          branch,
-          ...(existingSha ? { sha: existingSha } : {})
+          tree: newTreeSha,
+          parents: [baseCommitSha]
         })
       });
-      if (!putRes.ok) {
-        const errJson = await putRes.json().catch(() => ({}));
-        throw new Error(errJson.message || `GitHub HTTP ${putRes.status}`);
-      }
+      if (!commitRes.ok) throw new Error(`GitHub Commit HTTP ${commitRes.status}`);
+      const newCommitSha = (await commitRes.json()).sha;
+
+      const patchRes = await ghFetch(`/repos/${repo}/git/refs/heads/${branch}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sha: newCommitSha, force: true })
+      });
+      if (!patchRes.ok) throw new Error(`GitHub Ref HTTP ${patchRes.status}`);
+
       lastSyncAt = syncTs;
       lastSyncError = null;
       return { ok: true, at: lastSyncAt };
@@ -243,12 +263,12 @@ module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, require
       syncing = false;
       if (pendingSync) {
         pendingSync = false;
-        scheduleSync(1500);
+        scheduleSync(1000);
       }
     }
   }
 
-  function scheduleSync(delayMs = 2000) {
+  function scheduleSync(delayMs = 800) {
     if (!getToken()) return;
     if (syncTimer) clearTimeout(syncTimer);
     syncTimer = setTimeout(() => {
@@ -257,43 +277,54 @@ module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, require
     }, delayMs);
   }
 
-  // משיכה ושחזור אוטומטי מהענן בעליית השרת (פועל גם ללא טוקן במאגר ציבורי!)
+  // משיכה ושחזור אוטומטי מהענן בעליית השרת (פועל גם ללא טוקן במאגר ציבורי ותומך בקבצים גדולים!)
   async function restoreFromCloudOnBoot() {
-    const empCount = db.prepare('SELECT COUNT(*) c FROM employees').get().c;
-    if (empCount > 0) return false; // המסד המקומי כבר מכיל נתונים
+    const localEmps = db.prepare('SELECT COUNT(*) c FROM employees').get().c;
+    const localFiles = db.prepare('SELECT COUNT(*) c FROM files').get().c;
     const repo = getRepo(), branch = getBranch();
     try {
-      const res = await ghFetch(`/repos/${repo}/contents/easyhire-db.enc?ref=${encodeURIComponent(branch)}`);
-      if (res.status !== 200) return false;
-      const meta = await res.json();
-      let encBuf;
-      if (meta.content) {
-        encBuf = Buffer.from(meta.content.replace(/\s+/g, ''), 'base64');
-      } else if (meta.download_url) {
-        const dl = await fetch(meta.download_url);
-        if (!dl.ok) return false;
-        encBuf = Buffer.from(await dl.arrayBuffer());
-      } else {
-        return false;
-      }
+      const res = await ghFetch(`/repos/${repo}/contents/easyhire-db.enc?ref=${encodeURIComponent(branch)}`, {
+        headers: { 'Accept': 'application/vnd.github.raw' }
+      });
+      if (res.status !== 200) return { restored: false, cloudReachable: res.status === 404 };
+      const encBuf = Buffer.from(await res.arrayBuffer());
       const rawSqlite = decryptBuffer(encBuf);
-      restoreFromSqliteBuffer(rawSqlite);
-      if (syncSeedTemplates) syncSeedTemplates();
-      restoredOnBoot = true;
-      lastSyncAt = setting('cloud_last_sync') || now();
-      console.log('✅ מסד הנתונים והקבצים שוחזרו בהצלחה מהגיבוי הקבוע בענן!');
-      broadcast();
-      return true;
+
+      // בדיקה חכמה: משחזרים מהענן אם הדיסק המקומי ריק או אם בענן יש יותר מועמדים/קבצים
+      let shouldRestore = localEmps === 0;
+      if (!shouldRestore) {
+        const tmpCheck = path.join(DATA_DIR, 'cloud_check.db');
+        try {
+          fs.writeFileSync(tmpCheck, rawSqlite);
+          const { DatabaseSync } = require('node:sqlite');
+          const cdb = new DatabaseSync(tmpCheck);
+          const cEmps = cdb.prepare('SELECT COUNT(*) c FROM employees').get().c;
+          const cFiles = cdb.prepare('SELECT COUNT(*) c FROM files').get().c;
+          cdb.close();
+          if (cEmps > localEmps || cFiles > localFiles) shouldRestore = true;
+        } catch {} finally {
+          try { fs.rmSync(tmpCheck, { force: true }); } catch {}
+        }
+      }
+      if (shouldRestore) {
+        restoreFromSqliteBuffer(rawSqlite);
+        if (syncSeedTemplates) syncSeedTemplates();
+        restoredOnBoot = true;
+        lastSyncAt = setting('cloud_last_sync') || now();
+        console.log('✅ מסד הנתונים והקבצים שוחזרו בהצלחה מהגיבוי הקבוע בענן!');
+        broadcast();
+      }
+      return { restored: shouldRestore, cloudReachable: true };
     } catch (e) {
       console.error('Cloud DB boot restore skipped:', e.message);
-      return false;
+      return { restored: false, cloudReachable: false };
     }
   }
 
-  // הפעלת שחזור אוטומטי בעליית השרת + סנכרון קוד וגיבוי לענן אם מוגדר טוקן
-  restoreFromCloudOnBoot().then(async () => {
+  // הפעלת שחזור אוטומטי בעליית השרת + סנכרון קוד לענן (מבלי לדרוס גיבוי ענן אם הרשת נכשלה)
+  restoreFromCloudOnBoot().then(async (st) => {
     if (getToken()) {
-      await pushToCloudNow().catch(() => {});
+      if (st && st.cloudReachable) await pushToCloudNow().catch(() => {});
       const codeOk = await syncCodeToMain(getRepo()).catch(() => false);
       if (codeOk) console.log('✅ הקוד המעודכן סונכרן אוטומטית ל-GitHub (main) ול-Render!');
     }
