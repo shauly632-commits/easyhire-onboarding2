@@ -112,10 +112,10 @@ function syncSeedTemplates() {
   if (!db.prepare('SELECT 1 FROM templates LIMIT 1').get()) {
     const ins = db.prepare('INSERT INTO templates(title,description,fields,is_default,position,category,mandatory,gender_rule,institute_doc) VALUES(?,?,?,?,?,?,?,?,?)');
     seedTemplates.forEach((t, i) => ins.run(t.title, t.description, JSON.stringify(t.fields), t.is_default ? 1 : 0, i, t.category || 'כללי', t.mandatory ? 1 : 0, t.gender_rule || 'all', t.institute_doc || null));
-    putSetting('seed_version', 'v2_yifat_2026');
+    putSetting('seed_version', 'v3_yifat_2026');
     return;
   }
-  if (setting('seed_version') !== 'v2_yifat_2026') {
+  if (setting('seed_version') !== 'v3_yifat_2026') {
     const existing = db.prepare('SELECT id FROM templates ORDER BY position,id').all();
     const upd = db.prepare('UPDATE templates SET title=?,description=?,fields=?,is_default=?,position=?,category=?,mandatory=?,gender_rule=?,institute_doc=? WHERE id=?');
     const ins = db.prepare('INSERT INTO templates(title,description,fields,is_default,position,category,mandatory,gender_rule,institute_doc) VALUES(?,?,?,?,?,?,?,?,?)');
@@ -123,7 +123,7 @@ function syncSeedTemplates() {
       if (existing[i]) upd.run(t.title, t.description, JSON.stringify(t.fields), t.is_default ? 1 : 0, i, t.category || 'כללי', t.mandatory ? 1 : 0, t.gender_rule || 'all', t.institute_doc || null, existing[i].id);
       else ins.run(t.title, t.description, JSON.stringify(t.fields), t.is_default ? 1 : 0, i, t.category || 'כללי', t.mandatory ? 1 : 0, t.gender_rule || 'all', t.institute_doc || null);
     });
-    putSetting('seed_version', 'v2_yifat_2026');
+    putSetting('seed_version', 'v3_yifat_2026');
   }
 }
 syncSeedTemplates();
@@ -793,6 +793,46 @@ route('GET', '/api/export.csv', async (req, res) => {
       ...tpls.map((t) => (st[t.id] ? (st[t.id].status === 'submitted' ? 'הוגש ' + st[t.id].submitted_at.slice(0, 10) : 'ממתין') : '-'))].map(csvCell).join(','));
   }
   send(res, 200, '﻿' + rows.join('\r\n'), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="employees.csv"' });
+});
+// ייצוא נתוני 101, בנק ופנסיה לתוכנת השכר (תיק ניכויים 941707242 - אודי מרילי)
+route('GET', '/api/export-payroll.csv', async (req, res) => {
+  requireUser(req);
+  const headers = ['תיק ניכויים', 'מס׳ עובד', 'שם מלא', 'ת.ז.', 'מגדר', 'תאריך לידה', 'מצב משפחתי', 'קופת חולים', 'תושב ישראל', 'כתובת', 'ישוב', 'טלפון', 'דוא"ל', 'דירה / מסגרת', 'תפקיד', 'תאריך תחילת עבודה', 'בנק', 'סניף', 'מספר חשבון', 'סוג הכנסה (101)', 'הכנסות נוספות', 'פרטי ילדים', 'קופת פנסיה פעילה', 'שם וקוד קופת פנסיה', 'סטטוס קליטה'];
+  const rows = [headers.map(csvCell).join(',')];
+  for (const e of db.prepare('SELECT * FROM employees WHERE archived=0 ORDER BY id').all()) {
+    const merged = {};
+    for (const a of db.prepare('SELECT data FROM assignments WHERE employee_id=?').all(e.id)) {
+      Object.assign(merged, JSON.parse(a.data || '{}'));
+    }
+    rows.push([
+      '941707242',
+      e.employee_no || '',
+      e.full_name || merged.full_name || '',
+      e.id_number || merged.id_number || '',
+      e.gender === 'male' ? 'גבר' : e.gender === 'female' ? 'אישה' : (merged.gender || ''),
+      merged.birth_date || '',
+      merged.marital_status || '',
+      merged.health_fund || '',
+      merged.israeli_resident || 'כן',
+      merged.address || '',
+      merged.city || '',
+      e.phone || merged.phone || '',
+      e.email || merged.email || '',
+      e.department || merged.apartment_name || merged.framework || '',
+      e.job_title || merged.job_title || merged.role || '',
+      e.start_date || merged.start_date || '',
+      merged.bank || '',
+      merged.branch || '',
+      merged.account || '',
+      merged.income_type || '',
+      merged.other_income || '',
+      (merged.children_details || '').replace(/\r?\n/g, ' | '),
+      merged.pension_active || '',
+      merged.pension_details || merged.pension_fund || '',
+      STATUS_HE[employeeRow(e).status]
+    ].map(csvCell).join(','));
+  }
+  send(res, 200, '﻿' + rows.join('\r\n'), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="payroll-101-export.csv"' });
 });
 
 // פטור ממסמך (admin)

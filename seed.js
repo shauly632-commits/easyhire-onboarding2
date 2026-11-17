@@ -27,6 +27,7 @@ module.exports = [
       { key: 'city', label: 'ישוב', type: 'text', required: true },
       { key: 'zip', label: 'מיקוד', type: 'text' },
       { key: 'phone', label: 'טלפון נייד', type: 'phone', required: true, prefill: 'phone' },
+      { key: 'employee_photo', label: 'תמונה עדכנית של העובד/ת (לכרטיס עובד)', type: 'file', allow_exempt: true },
       { key: 'h_bank', label: 'פרטי חשבון בנק להעברת משכורת', type: 'heading' },
       { key: 'bank', label: 'שם הבנק / מספר בנק', type: 'text', required: true },
       { key: 'branch', label: 'מספר סניף', type: 'text', required: true },
