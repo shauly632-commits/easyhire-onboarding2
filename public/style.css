@@ -66,8 +66,21 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--pri);box
 .consent input{width:22px;height:22px;margin-top:3px;flex:none;accent-color:var(--pri)}
 .radios label{display:inline-flex;align-items:center;gap:8px;margin-inline-end:18px;min-height:42px}
 .radios input{width:20px;height:20px;accent-color:var(--pri)}
-.docview{border:1px solid var(--line);border-radius:16px;background:#e9ebf5;padding:8px;max-height:460px;overflow:auto;margin-top:14px}
+.docview{border:1px solid var(--line);border-radius:16px;background:#e9ebf5;padding:8px;max-height:540px;overflow:auto;margin-top:14px}
 .docview img{display:block;width:100%;height:auto;border-radius:8px;background:#fff;margin-bottom:8px}
+.docpage{position:relative;margin-bottom:10px;border-radius:8px;overflow:hidden;background:#fff}
+.docpage>img{display:block;width:100%;height:auto;margin:0}
+.doc-ov{position:absolute;color:#0b2e6b;font-weight:700;font-size:clamp(9px,1.85vw,14px);line-height:1.15;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
+.doc-ov.mask{background:#fff}
+.doc-ov.banner{background:rgba(240,246,255,.95);border:1px solid #b6d2fb;border-radius:6px;padding:4px 8px;font-size:clamp(8px,1.55vw,12px);white-space:normal}
+.doc-ov img.ov-sig{max-width:100%;max-height:100%;object-fit:contain;display:block;margin:0 auto;background:transparent}
+.big-alert{background:#fff4e5;border:2px solid #ff8f00;border-radius:16px;padding:18px;margin-top:14px;color:#4e2600;box-shadow:0 4px 14px rgba(255,143,0,.12)}
+.big-alert h4{margin:0 0 8px;font-size:1.18rem;color:#c62828;display:flex;align-items:center;gap:8px;line-height:1.35}
+.big-alert p{margin:0;font-size:1.02rem;font-weight:700;line-height:1.65;white-space:pre-wrap}
+.big-alert .btns,.link-card .btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+.link-card{background:linear-gradient(135deg,#eef5ff,#f5f7ff);border:1.5px solid #b5d0fa;border-radius:16px;padding:16px;margin-top:14px}
+.link-card h4{margin:0 0 6px;font-size:1.04rem;color:var(--pri-d);display:flex;align-items:center;gap:8px}
+.link-card p{margin:0;font-size:.93rem;line-height:1.65;white-space:pre-wrap;color:var(--ink)}
 .exempt{margin-top:8px;font-size:.92rem}
 .exempt button{background:none;border:0;color:var(--pri);text-decoration:underline;cursor:pointer;padding:4px 0;min-height:32px}
 .exempt .box{background:var(--warnbg);border-radius:12px;padding:10px 12px;margin-top:6px}

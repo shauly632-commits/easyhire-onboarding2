@@ -15,7 +15,7 @@ const TABLES = [
   'emp_groups', 'emp_group_members', 'msg_templates', 'messages', 'message_recipients'
 ];
 
-module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, requireUser, readBody, send, HttpError, tx, now, setting, putSetting, broadcast }) {
+module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, requireUser, readBody, send, HttpError, tx, now, setting, putSetting, broadcast, syncSeedTemplates }) {
   const SNAP_PATH = path.join(DATA_DIR, 'cloud_snapshot.db');
   const RESTORE_PATH = path.join(DATA_DIR, 'cloud_restore.db');
   const ENC_MAGIC = Buffer.from('EHDB01');
@@ -154,7 +154,7 @@ module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, require
   // סנכרון אוטומטי של קבצי הקוד המקומיים לענף main ב-GitHub (כדי ש-Render יתעדכן אוטומטית בלי תלות ב-git.exe)
   async function syncCodeToMain(repo) {
     const rootDir = path.join(DATA_DIR, '..');
-    const codeFiles = ['server.js', 'modules/cloud-db.js', 'modules/people.js', 'modules/comms.js', 'public/admin.html', 'public/admin/core.js', 'public/admin/people.js', 'public/admin/messages.js', 'public/app.html', 'public/forms.js'];
+    const codeFiles = ['server.js', 'seed.js', 'modules/cloud-db.js', 'modules/people.js', 'modules/comms.js', 'public/style.css', 'public/admin.css', 'public/admin.html', 'public/admin/core.js', 'public/admin/people.js', 'public/admin/messages.js', 'public/app.html', 'public/forms.js'];
     const treeItems = [];
     for (const rel of codeFiles) {
       const full = path.join(rootDir, rel);
@@ -278,6 +278,7 @@ module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, require
       }
       const rawSqlite = decryptBuffer(encBuf);
       restoreFromSqliteBuffer(rawSqlite);
+      if (syncSeedTemplates) syncSeedTemplates();
       restoredOnBoot = true;
       lastSyncAt = setting('cloud_last_sync') || now();
       console.log('✅ מסד הנתונים והקבצים שוחזרו בהצלחה מהגיבוי הקבוע בענן!');

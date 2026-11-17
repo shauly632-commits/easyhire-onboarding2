@@ -108,10 +108,25 @@ if (!db.prepare('SELECT 1 FROM users LIMIT 1').get()) {
   console.log(' (מומלץ להחליף סיסמה במסך "הגדרות")');
   console.log('==============================================\n');
 }
-if (!db.prepare('SELECT 1 FROM templates LIMIT 1').get()) {
-  const ins = db.prepare('INSERT INTO templates(title,description,fields,is_default,position,category,mandatory,gender_rule,institute_doc) VALUES(?,?,?,?,?,?,?,?,?)');
-  seedTemplates.forEach((t, i) => ins.run(t.title, t.description, JSON.stringify(t.fields), t.is_default ? 1 : 0, i, t.category || 'כללי', t.mandatory ? 1 : 0, t.gender_rule || 'all', t.institute_doc || null));
+function syncSeedTemplates() {
+  if (!db.prepare('SELECT 1 FROM templates LIMIT 1').get()) {
+    const ins = db.prepare('INSERT INTO templates(title,description,fields,is_default,position,category,mandatory,gender_rule,institute_doc) VALUES(?,?,?,?,?,?,?,?,?)');
+    seedTemplates.forEach((t, i) => ins.run(t.title, t.description, JSON.stringify(t.fields), t.is_default ? 1 : 0, i, t.category || 'כללי', t.mandatory ? 1 : 0, t.gender_rule || 'all', t.institute_doc || null));
+    putSetting('seed_version', 'v2_yifat_2026');
+    return;
+  }
+  if (setting('seed_version') !== 'v2_yifat_2026') {
+    const existing = db.prepare('SELECT id FROM templates ORDER BY position,id').all();
+    const upd = db.prepare('UPDATE templates SET title=?,description=?,fields=?,is_default=?,position=?,category=?,mandatory=?,gender_rule=?,institute_doc=? WHERE id=?');
+    const ins = db.prepare('INSERT INTO templates(title,description,fields,is_default,position,category,mandatory,gender_rule,institute_doc) VALUES(?,?,?,?,?,?,?,?,?)');
+    seedTemplates.forEach((t, i) => {
+      if (existing[i]) upd.run(t.title, t.description, JSON.stringify(t.fields), t.is_default ? 1 : 0, i, t.category || 'כללי', t.mandatory ? 1 : 0, t.gender_rule || 'all', t.institute_doc || null, existing[i].id);
+      else ins.run(t.title, t.description, JSON.stringify(t.fields), t.is_default ? 1 : 0, i, t.category || 'כללי', t.mandatory ? 1 : 0, t.gender_rule || 'all', t.institute_doc || null);
+    });
+    putSetting('seed_version', 'v2_yifat_2026');
+  }
 }
+syncSeedTemplates();
 
 // ---------- sessions & rate limit ----------
 function getUser(req) {
@@ -160,7 +175,7 @@ const parseTpl = (t) => ({ id: t.id, title: t.title, description: t.description,
 
 function cleanFields(fields) {
   if (!Array.isArray(fields) || fields.length > 80) throw new HttpError(400, 'רשימת שדות לא תקינה');
-  const types = ['text', 'textarea', 'number', 'date', 'phone', 'email', 'idnumber', 'select', 'radio', 'consent', 'file', 'signature', 'heading', 'paragraph', 'document'];
+  const types = ['text', 'textarea', 'number', 'date', 'phone', 'email', 'idnumber', 'select', 'radio', 'consent', 'file', 'signature', 'heading', 'paragraph', 'document', 'alert', 'link'];
   const seen = new Set();
   return fields.map((f, i) => {
     if (!types.includes(f.type)) throw new HttpError(400, 'סוג שדה לא נתמך');
@@ -169,9 +184,16 @@ function cleanFields(fields) {
     const o = { key, type: f.type, label: String(f.label || '').slice(0, 200), required: !!f.required };
     if (f.text) o.text = String(f.text).slice(0, 5000);
     if (['select', 'radio'].includes(f.type)) o.options = (f.options || []).map((x) => String(x).slice(0, 100)).filter(Boolean).slice(0, 40);
-    if (f.default === 'today') o.default = 'today';
-    if (f.prefill && ['full_name', 'phone', 'email', 'id_number', 'gender'].includes(f.prefill)) o.prefill = f.prefill;
+    if (f.default) o.default = String(f.default).slice(0, 100);
+    if (f.prefill && ['full_name', 'phone', 'email', 'id_number', 'gender', 'job_title', 'department', 'start_date'].includes(f.prefill)) o.prefill = f.prefill;
     if (f.type === 'file' && f.allow_exempt) o.allow_exempt = true;
+    if (['alert', 'link'].includes(f.type)) {
+      if (f.url) o.url = String(f.url).slice(0, 500);
+      if (f.btn_label) o.btn_label = String(f.btn_label).slice(0, 140);
+      if (f.download && /^[a-z0-9-]+\.pdf$/.test(f.download)) o.download = f.download;
+      if (f.download_label) o.download_label = String(f.download_label).slice(0, 140);
+      o.required = false;
+    }
     if (f.type === 'document') {
       o.doc = String(f.doc || '').replace(/[^a-z0-9]/g, '').slice(0, 40);
       o.pages = Math.min(20, Math.max(1, +f.pages || 1));
@@ -212,12 +234,21 @@ function assignmentView(a) {
   return { id: a.id, status: a.status, approved: !!a.approved, data: JSON.parse(a.data || '{}'), exemptions: JSON.parse(a.exemptions || '{}'), updated_at: a.updated_at,
     submitted_at: a.submitted_at, template: parseTpl(t), files: db.prepare('SELECT id,field_key,filename,mime,approved FROM files WHERE assignment_id=?').all(a.id).map((f) => ({ ...f, approved: !!f.approved })) };
 }
-const prefillFor = (e) => ({ full_name: e.full_name, phone: e.phone, email: e.email, id_number: e.id_number, gender: e.gender === 'male' ? 'גבר' : e.gender === 'female' ? 'אישה' : '' });
+const prefillFor = (e) => ({
+  full_name: e.full_name,
+  phone: e.phone,
+  email: e.email,
+  id_number: e.id_number,
+  gender: e.gender === 'male' ? 'גבר' : e.gender === 'female' ? 'אישה' : '',
+  job_title: e.job_title || 'מדריך/ת דיור',
+  department: e.department || '',
+  start_date: e.start_date || ''
+});
 
 function validateSubmission(tpl, data, files, exemptions) {
   const errors = {};
   for (const f of tpl.fields) {
-    if (['heading', 'paragraph', 'document'].includes(f.type)) continue;
+    if (['heading', 'paragraph', 'document', 'alert', 'link'].includes(f.type)) continue;
     const v = data[f.key];
     const empty = v === undefined || v === null || String(v).trim() === '' || v === false;
     if (f.type === 'file') {
@@ -240,7 +271,7 @@ function validateSubmission(tpl, data, files, exemptions) {
 function sanitizeData(tpl, data) {
   const out = {};
   for (const f of tpl.fields) {
-    if (['heading', 'paragraph', 'file', 'document'].includes(f.type)) continue;
+    if (['heading', 'paragraph', 'file', 'document', 'alert', 'link'].includes(f.type)) continue;
     let v = data[f.key];
     if (v === undefined) continue;
     if (f.type === 'consent') v = !!v;
@@ -292,22 +323,73 @@ const streamDoc = (res, file) => {
 const STATUS_HE = { new: 'טרם התחיל', progress: 'בתהליך מילוי', review: 'ממתין לבדיקה', approved: 'נקלט ואושר' };
 const csvCell = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
 
-// ---------- חבילת טפסים (מייל / הדפסה) ----------
+// ---------- חבילת טפסים (מייל / הדפסה מלאה כולל מסמכים מצורפים) ----------
+const fmtIlDate = (v) => { if (!v) return ''; const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v); return m ? `${m[3]}/${m[2]}/${m[1]}` : v; };
+function renderDocOverlaysHtml(doc, page, vals = {}) {
+  const ov = (style, text, extraCls = '') => `<div class="doc-ov ${extraCls}" style="${style}">${text}</div>`;
+  const sigImg = (style) => vals.signature ? ov(style, `<img class="ov-sig" src="${vals.signature}" alt="חתימה">`) : '';
+  let out = '';
+  if (doc === 'contract' && page === 1) {
+    out += ov('top:37.2%;left:26%;width:48%;height:9.3%', '', 'mask');
+    if (vals.apartment_name) out += ov('top:21.3%;right:43%;width:22%', esc(vals.apartment_name));
+    if (vals.sign_date) out += ov('top:25.0%;right:40%;width:22%', esc(fmtIlDate(vals.sign_date)));
+    if (vals.full_name) out += ov('top:34.2%;right:34.5%;width:32%', esc(vals.full_name));
+    if (vals.start_date) out += ov('top:60.7%;right:40.5%;width:22%', esc(fmtIlDate(vals.start_date)));
+    if (vals.job_title) out += ov('top:66.1%;right:29.5%;padding:0 6px', esc(vals.job_title), 'mask');
+    if (vals.manager_name) out += ov('top:72.2%;right:47%;width:25%', esc(vals.manager_name));
+    if (vals.hourly_wage) out += ov('top:82.4%;right:31.5%;padding:0 6px', esc(vals.hourly_wage + ' ברוטו לשעה.'), 'mask');
+  } else if (doc === 'contract' && page === 3) {
+    out += sigImg('top:45.2%;left:54%;width:25%;height:6.5%');
+    if (vals.full_name) out += ov('top:54.8%;left:54%;width:25%;font-size:11px', esc(vals.full_name + (vals.sign_date ? ' · ' + fmtIlDate(vals.sign_date) : '')));
+  } else if (doc === 'appendixa' && page === 1) {
+    const parts = [
+      vals.full_name && 'שם העובד/ת: ' + vals.full_name,
+      vals.id_number && 'ת.ז.: ' + vals.id_number,
+      vals.job_title && 'תפקיד/מסגרת: ' + vals.job_title,
+      vals.pension_fund && 'קופה: ' + vals.pension_fund,
+      vals.sign_date && 'תאריך: ' + fmtIlDate(vals.sign_date)
+    ].filter(Boolean);
+    if (parts.length) out += ov('top:2.2%;left:10%;right:10%', esc(parts.join('   ·   ')), 'banner');
+    out += sigImg('top:73.8%;left:17%;width:25%;height:6.5%');
+    if (vals.full_name) out += ov('top:83.2%;left:15%;width:29%;font-size:11px', esc(vals.full_name + (vals.sign_date ? ' (' + fmtIlDate(vals.sign_date) + ')' : '')));
+  } else if (doc === 'appendixb' && page === 1) {
+    if (vals.full_name) out += ov('top:21.2%;right:25.5%;width:21.5%', esc(vals.full_name));
+    if (vals.id_number) out += ov('top:21.2%;left:22%;width:22%', esc(vals.id_number));
+    if (vals.role) out += ov('top:27.6%;right:25.5%;width:21.5%', esc(vals.role));
+    if (vals.framework) out += ov('top:27.6%;left:21%;width:24%', esc(vals.framework));
+    if (vals.sign_date) out += ov('top:75.0%;right:20%;width:27%', esc(fmtIlDate(vals.sign_date)));
+    if (vals.full_name) out += ov('top:75.0%;left:22%;width:20%', esc(vals.full_name));
+    if (vals.role) out += ov('top:79.0%;right:20%;width:27%', esc(vals.role));
+    out += sigImg('top:76.2%;left:21%;width:23%;height:5.5%');
+  }
+  return out;
+}
+
 function buildPackage(empId, mode) {
   const e = db.prepare('SELECT * FROM employees WHERE id=?').get(empId);
   const as = db.prepare('SELECT a.* FROM assignments a JOIN templates t ON t.id=a.template_id WHERE a.employee_id=? ORDER BY t.position,t.id').all(empId).map(assignmentView);
-  const inline = [], attachments = [];
+  const inline = [], attachments = [], webAttachmentsHtml = [];
   let bytes = 0, skipped = 0, sigN = 0;
   const company = setting('company_name');
   const th = 'style="text-align:right;padding:6px 10px;color:#666;font-weight:normal;width:34%;vertical-align:top;border-bottom:1px solid #eee"';
   const td = 'style="text-align:right;padding:6px 10px;border-bottom:1px solid #eee"';
   const emp = (e.full_name || '').replace(/[\\/:*?"<>|]/g, '');
+  const pf = prefillFor(e);
   let body = '';
   as.forEach((a, idx) => {
     const t = a.template, ok = a.status === 'submitted';
-    let rows = '';
+    const mergedVals = { ...pf, ...(a.data || {}) };
+    let rows = '', docsHtml = '';
     for (const f of t.fields) {
-      if (['heading', 'paragraph', 'document'].includes(f.type)) continue;
+      if (['heading', 'paragraph', 'alert', 'link'].includes(f.type)) continue;
+      if (f.type === 'document') {
+        if (mode === 'web' && ['contract', 'appendixa', 'appendixb'].includes(f.doc) && (ok || Object.keys(a.data || {}).length)) {
+          for (let p = 1; p <= (f.pages || 1); p++) {
+            docsHtml += `<div class="docpage" style="page-break-inside:avoid;margin:14px 0;border:1px solid #d5dbe8"><img src="/api/docs/${f.doc}-${p}.jpg" alt="${esc(t.title)} עמוד ${p}">${renderDocOverlaysHtml(f.doc, p, mergedVals)}</div>`;
+          }
+        }
+        continue;
+      }
       const v = a.data[f.key]; let cell;
       if (f.type === 'signature') {
         if (!v) cell = '—';
@@ -324,25 +406,53 @@ function buildPackage(empId, mode) {
             const fname = `${String(idx + 1).padStart(2, '0')}_${(f.label || f.key).replace(/[\\/:*?"<>|]/g, '')}_${emp}.${ext}`;
             if (buf && bytes + buf.length < 18 * 1024 * 1024) { bytes += buf.length; attachments.push({ filename: fname, mime: fl.mime, data: buf }); cell = '📎 מצורף: ' + esc(fname); }
             else { skipped++; cell = '📎 הקובץ זמין במערכת (חריגה ממגבלת גודל המייל)'; }
-          } else cell = `<a href="/api/files/${fl.id}" target="_blank">📎 ${esc(fl.filename)}</a>` + (fl.mime.startsWith('image/') ? `<br><img src="/api/files/${fl.id}" style="max-width:260px;margin-top:6px;border-radius:6px">` : '');
+          } else {
+            cell = `<a href="/api/files/${fl.id}" target="_blank">📎 ${esc(fl.filename)}</a>` + (fl.mime.startsWith('image/') ? `<br><img src="/api/files/${fl.id}" style="max-width:220px;margin-top:6px;border-radius:6px;border:1px solid #ddd">` : '');
+            webAttachmentsHtml.push(`<div class="att-block" style="page-break-inside:avoid;margin:18px 0;padding:16px;border:1px solid #d5dbe8;border-radius:12px;background:#fff">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;border-bottom:1px solid #eee;padding-bottom:8px">
+                <div><b>📎 ${esc(f.label)}</b> <span style="color:#666;font-size:13px">(${esc(t.title)} · ${esc(fl.filename)})</span></div>
+                <a class="noprint" href="/api/files/${fl.id}" target="_blank" style="font-size:13px;color:#0073ea">פתיחה בחלון נפרד ↗</a>
+              </div>
+              ${fl.mime.startsWith('image/')
+                ? `<img src="/api/files/${fl.id}" alt="${esc(f.label)}" style="display:block;max-width:100%;max-height:860px;margin:0 auto;border-radius:6px">`
+                : `<iframe src="/api/files/${fl.id}" style="width:100%;height:780px;border:1px solid #ccc;border-radius:6px"></iframe>`}
+            </div>`);
+          }
         } else if (ex) cell = `פטור ממסמך (${ex.status === 'approved' ? 'אושר' : ex.status === 'rejected' ? 'נדחה' : 'ממתין לאישור'}): ${esc(ex.reason)}`;
         else cell = '—';
       } else if (f.type === 'consent') cell = v ? '✓ אושר' : '—';
       else cell = esc(v || '—').replace(/\n/g, '<br>');
       rows += `<tr><th ${th}>${esc(f.label)}</th><td ${td}>${cell}</td></tr>`;
     }
-    body += `<h3 style="margin:26px 0 6px;font-size:16px">${idx + 1}. ${esc(t.title)} <span style="font-size:12px;font-weight:normal;color:${ok ? '#15935a' : '#b7791f'}">${ok ? '✓ הוגש ' + new Date(a.submitted_at).toLocaleString('he-IL') : '● לא הוגש'}</span></h3><table style="width:100%;border-collapse:collapse;font-size:14px">${rows}</table>`;
+    body += `<div class="form-sec" style="margin-top:24px"><h3 style="margin:0 0 6px;font-size:16px">${idx + 1}. ${esc(t.title)} <span style="font-size:12px;font-weight:normal;color:${ok ? '#15935a' : '#b7791f'}">${ok ? '✓ הוגש ' + new Date(a.submitted_at).toLocaleString('he-IL') : '● בתהליך / טיוטה'}</span></h3><table style="width:100%;border-collapse:collapse;font-size:14px">${rows}</table>${docsHtml}</div>`;
     const full = db.prepare('SELECT institute_doc FROM templates WHERE id=?').get(t.id);
     if (mode === 'email' && full.institute_doc && fs.existsSync(path.join(DOCS_DIR, full.institute_doc)) && !attachments.some((x) => x.filename === full.institute_doc)) {
       const data = fs.readFileSync(path.join(DOCS_DIR, full.institute_doc));
       attachments.push({ filename: `תעודת_מוסד_${t.title.includes('מין') ? 'עבירות_מין' : 'אלימות'}.pdf`, mime: 'application/pdf', data });
     }
   });
+  if (mode === 'web' && webAttachmentsHtml.length) {
+    body += `<div style="margin-top:36px;border-top:2px solid #0073ea;padding-top:18px"><h2 style="margin:0 0 12px;font-size:19px">📎 נספחים ומסמכים מצורפים לתיק העובד (${webAttachmentsHtml.length})</h2>${webAttachmentsHtml.join('')}</div>`;
+  }
   const done = as.filter((a) => a.status === 'submitted').length;
-  const html = `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>תיק קליטה - ${esc(e.full_name)}</title>${mode === 'web' ? '<style>body{font-family:Arial,sans-serif;max-width:820px;margin:20px auto;padding:0 14px}@media print{h3{break-after:avoid}table{break-inside:avoid}}</style>' : ''}</head>
+  const webCss = `<style>
+    body{font-family:Arial,sans-serif;max-width:860px;margin:20px auto;padding:0 14px}
+    .docpage{position:relative;border-radius:8px;overflow:hidden;background:#fff}
+    .docpage>img{display:block;width:100%;height:auto;margin:0}
+    .doc-ov{position:absolute;color:#0b2e6b;font-weight:700;font-size:13px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
+    .doc-ov.mask{background:#fff}
+    .doc-ov.banner{background:rgba(240,246,255,.95);border:1px solid #b6d2fb;border-radius:6px;padding:4px 8px;font-size:11px;white-space:normal}
+    .doc-ov img.ov-sig{max-width:100%;max-height:100%;object-fit:contain;display:block;margin:0 auto}
+    .pbar{display:flex;justify-content:space-between;align-items:center;gap:12px;background:#fff;border:1px solid #d5dbe8;border-radius:12px;padding:12px 18px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+    .pbtn{background:#0073ea;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:15px;font-weight:700;cursor:pointer}
+    @media print{.noprint{display:none!important}body{background:#fff!important;margin:0;padding:0}h3{break-after:avoid}table,.docpage,.att-block{break-inside:avoid}}
+  </style>`;
+  const printBar = mode === 'web' ? `<div class="pbar noprint"><div><b>תיק עובד מלא להדפסה (כולל הסכמים חתומים ומסמכים מצורפים)</b><div style="font-size:13px;color:#666">${esc(e.full_name)} · תיק ניכויים 941707242 (אודי מרילי)</div></div><button class="pbtn" onclick="window.print()">🖨️ הדפסת תיק עובד מלא / שמירה כ-PDF</button></div>` : '';
+  const html = `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>תיק קליטה - ${esc(e.full_name)}</title>${mode === 'web' ? webCss : ''}</head>
 <body style="font-family:Arial,Helvetica,sans-serif;direction:rtl;color:#1c2236;background:#f6f7fb;margin:0;padding:${mode === 'email' ? '16px' : '0'}">
-<div style="max-width:780px;margin:auto;background:#fff;border-radius:14px;padding:22px;border:1px solid #e3e7f1">
-<div style="font-size:12px;color:#6b7390">${esc(company)}</div>
+${printBar}
+<div style="max-width:820px;margin:auto;background:#fff;border-radius:14px;padding:22px;border:1px solid #e3e7f1">
+<div style="font-size:12px;color:#6b7390">${esc(company)} · תיק ניכויים: 941707242</div>
 <h2 style="margin:4px 0 2px">תיק קליטת עובד: ${esc(e.full_name)}</h2>
 <div style="color:#6b7390;font-size:14px">${[e.job_title, e.department, e.id_number && 'ת.ז. ' + e.id_number, e.phone, e.email].filter(Boolean).map(esc).join(' · ')}</div>
 <div style="margin:10px 0;padding:10px 14px;border-radius:10px;background:${done === as.length ? '#e3f6ec' : '#fdf3dc'};font-size:14px">${done === as.length ? '✅ העובד השלים את כל הטפסים' : `הוגשו ${done} מתוך ${as.length} טפסים`} · ${attachments.length ? attachments.length + ' קבצים מצורפים למייל' : ''}${skipped ? ` · ${skipped} קבצים לא צורפו (גודל), זמינים במערכת` : ''}</div>
@@ -617,6 +727,20 @@ route('POST', '/api/assignments/(\\d+)/approve', async (req, res, m) => {
   db.prepare('UPDATE assignments SET approved=? WHERE id=?').run(b.approved ? 1 : 0, +m[1]);
   send(res, 200, { ok: true });
 });
+// עריכת פרטי טופס וחתימה על גבי הטופס ישירות על ידי משאבי אנוש
+route('PUT', '/api/assignments/(\\d+)/data', async (req, res, m) => {
+  requireUser(req); const b = await readBody(req);
+  const a = db.prepare('SELECT * FROM assignments WHERE id=?').get(+m[1]);
+  if (!a) throw new HttpError(404, 'הטופס לא נמצא');
+  const tpl = parseTpl(db.prepare('SELECT * FROM templates WHERE id=?').get(a.template_id));
+  const data = sanitizeData(tpl, b.data || {});
+  if (b.submit) {
+    db.prepare("UPDATE assignments SET data=?,status='submitted',submitted_at=COALESCE(submitted_at,?),updated_at=? WHERE id=?").run(JSON.stringify(data), now(), now(), a.id);
+  } else {
+    db.prepare('UPDATE assignments SET data=?,updated_at=? WHERE id=?').run(JSON.stringify(data), now(), a.id);
+  }
+  send(res, 200, { ok: true });
+});
 route('POST', '/api/employees/(\\d+)/hire', async (req, res, m) => {
   const u = requireUser(req); const b = await readBody(req);
   const e = db.prepare('SELECT * FROM employees WHERE id=? AND archived=0').get(+m[1]);
@@ -822,7 +946,7 @@ route('GET', '/api/e/([a-f0-9]+)/templates/(\\d+)/attachment', async (req, res, 
 });
 
 // ---------- מודולים: עובדים פעילים וקבוצות, מרכז הודעות, ומסד נתונים קבוע בענן ----------
-const ctx = { db, DATA_DIR, UPLOAD_DIR, route, requireUser, readBody, send, HttpError, tx, now, esc, setting, putSetting, smtpCfg, sendMail, broadcast };
+const ctx = { db, DATA_DIR, UPLOAD_DIR, route, requireUser, readBody, send, HttpError, tx, now, esc, setting, putSetting, smtpCfg, sendMail, broadcast, syncSeedTemplates };
 require('./modules/people')(ctx);
 require('./modules/comms')(ctx);
 const cloudDb = require('./modules/cloud-db')(ctx);

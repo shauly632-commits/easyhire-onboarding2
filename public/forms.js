@@ -202,6 +202,58 @@
     return $e('div', { class: 'filebox' }, drop, input, exBox);
   }
 
+  // ---------- שכבת מילוי וחתימה חיה על גבי מסמכים (הסכם עבודה, נספח א׳, נספח ב׳) ----------
+  const fmtIlDate = (v) => { if (!v) return ''; const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v); return m ? `${m[3]}/${m[2]}/${m[1]}` : v; };
+  function fillDocOverlays(pageEl, doc, page, vals = {}) {
+    pageEl.querySelectorAll('.doc-ov').forEach((n) => n.remove());
+    const ov = (style, content, cls = '') => {
+      const d = $e('div', { class: 'doc-ov' + (cls ? ' ' + cls : ''), style }, content);
+      pageEl.append(d);
+    };
+    const sigImg = (style) => vals.signature ? ov(style, $e('img', { class: 'ov-sig', src: vals.signature, alt: 'חתימה' })) : null;
+
+    if (doc === 'contract' && page === 1) {
+      // הסתרת השורות הכפולות (ת.ז., כתובת, טלפון נייד) מדף הסכם העבודה לפי הנחיית יפעת
+      ov('top:37.2%;left:26%;width:48%;height:9.3%', '', 'mask');
+      if (vals.apartment_name) ov('top:21.3%;right:43%;width:22%', vals.apartment_name);
+      if (vals.sign_date) ov('top:25.0%;right:40%;width:22%', fmtIlDate(vals.sign_date));
+      if (vals.full_name) ov('top:34.2%;right:34.5%;width:32%', vals.full_name);
+      if (vals.start_date) ov('top:60.7%;right:40.5%;width:22%', fmtIlDate(vals.start_date));
+      if (vals.job_title) ov('top:66.1%;right:29.5%;padding:0 6px', vals.job_title, 'mask');
+      if (vals.manager_name) ov('top:72.2%;right:47%;width:25%', vals.manager_name);
+      if (vals.hourly_wage) ov('top:82.4%;right:31.5%;padding:0 6px', vals.hourly_wage + ' ברוטו לשעה.', 'mask');
+    } else if (doc === 'contract' && page === 3) {
+      sigImg('top:45.2%;left:54%;width:25%;height:6.5%');
+      if (vals.full_name) ov('top:54.8%;left:54%;width:25%;font-size:11px', vals.full_name + (vals.sign_date ? ' · ' + fmtIlDate(vals.sign_date) : ''));
+    } else if (doc === 'appendixa' && page === 1) {
+      const parts = [
+        vals.full_name && 'שם העובד/ת: ' + vals.full_name,
+        vals.id_number && 'ת.ז.: ' + vals.id_number,
+        vals.job_title && 'תפקיד/מסגרת: ' + vals.job_title,
+        vals.pension_fund && 'קופה: ' + vals.pension_fund,
+        vals.sign_date && 'תאריך: ' + fmtIlDate(vals.sign_date)
+      ].filter(Boolean);
+      if (parts.length) ov('top:2.2%;left:10%;right:10%', parts.join('   ·   '), 'banner');
+      sigImg('top:73.8%;left:17%;width:25%;height:6.5%');
+      if (vals.full_name) ov('top:83.2%;left:15%;width:29%;font-size:11px', vals.full_name + (vals.sign_date ? ' (' + fmtIlDate(vals.sign_date) + ')' : ''));
+    } else if (doc === 'appendixb' && page === 1) {
+      if (vals.full_name) ov('top:21.2%;right:25.5%;width:21.5%', vals.full_name);
+      if (vals.id_number) ov('top:21.2%;left:22%;width:22%', vals.id_number);
+      if (vals.role) ov('top:27.6%;right:25.5%;width:21.5%', vals.role);
+      if (vals.framework) ov('top:27.6%;left:21%;width:24%', vals.framework);
+      if (vals.sign_date) ov('top:75.0%;right:20%;width:27%', fmtIlDate(vals.sign_date));
+      if (vals.full_name) ov('top:75.0%;left:22%;width:20%', vals.full_name);
+      if (vals.role) ov('top:79.0%;right:20%;width:27%', vals.role);
+      sigImg('top:76.2%;left:21%;width:23%;height:5.5%');
+    }
+  }
+
+  function buildDocPage(doc, page, vals, docUrl) {
+    const p = $e('div', { class: 'docpage' }, $e('img', { src: docUrl(doc + '-' + page + '.jpg'), alt: 'עמוד ' + page, loading: 'lazy' }));
+    fillDocOverlays(p, doc, page, vals);
+    return p;
+  }
+
   // ---------- רינדור טופס ----------
   /**
    * opts: { data, files:[{id,field_key,filename}], prefill:{full_name,phone,email}, onChange(vals), upload(key,payload)->meta, fileUrl(id) }
@@ -213,22 +265,43 @@
     const files = new Map((opts.files || []).map((x) => [x.field_key, x]));
     const exemptions = { ...(opts.exemptions || {}) };
     const nodes = new Map();
+    const docPages = [];
     let timer, lastSaved = JSON.stringify(opts.data || {});
+    const refreshDocs = () => docPages.forEach(({ el, doc, page }) => fillDocOverlays(el, doc, page, vals));
     // שומרים רק כשמשהו באמת השתנה מאז השמירה האחרונה
     const save = () => { const j = JSON.stringify(vals); if (j === lastSaved || !opts.onChange) return; lastSaved = j; return opts.onChange(vals); };
-    const changed = () => { clearTimeout(timer); timer = setTimeout(save, 700); };
-    const flush = () => { clearTimeout(timer); return save(); };
+    const changed = () => { refreshDocs(); clearTimeout(timer); timer = setTimeout(save, 700); };
+    const flush = () => { refreshDocs(); clearTimeout(timer); return save(); };
 
     for (const f of tpl.fields) {
       if (vals[f.key] === undefined) {
         if (f.default === 'today') vals[f.key] = todayStr();
         else if (f.prefill && opts.prefill && opts.prefill[f.prefill]) vals[f.key] = opts.prefill[f.prefill];
+        else if (f.default) vals[f.key] = f.default;
       }
       if (f.type === 'heading') { container.append($e('h3', { style: 'margin-top:22px', text: f.label })); continue; }
       if (f.type === 'paragraph') { container.append($e('div', { class: 'para', style: 'margin-top:14px', text: f.text || f.label })); continue; }
+      if (f.type === 'alert') {
+        const btns = $e('div', { class: 'btns' },
+          f.url ? $e('a', { href: f.url, target: '_blank', rel: 'noopener', class: 'btn', icon: 'link', text: f.btn_label || 'פתיחת קישור' }) : null,
+          f.download && opts.docUrl ? $e('a', { href: opts.docUrl(f.download), target: '_blank', class: 'btn sec', icon: 'download', text: f.download_label || 'הורדת מסמך' }) : null);
+        container.append($e('div', { class: 'big-alert' }, $e('h4', { icon: 'alert', text: f.label }), f.text ? $e('p', { text: f.text }) : null, (f.url || f.download) ? btns : null));
+        continue;
+      }
+      if (f.type === 'link') {
+        const btns = $e('div', { class: 'btns' },
+          f.url ? $e('a', { href: f.url, target: '_blank', rel: 'noopener', class: 'btn', icon: 'link', text: f.btn_label || 'מעבר לאתר המקוון' }) : null,
+          f.download && opts.docUrl ? $e('a', { href: opts.docUrl(f.download), target: '_blank', class: 'btn sec', icon: 'download', text: f.download_label || 'הורדת תעודת מוסד חתומה (PDF)' }) : null);
+        container.append($e('div', { class: 'link-card' }, $e('h4', { icon: 'shield', text: f.label }), f.text ? $e('p', { text: f.text }) : null, btns));
+        continue;
+      }
       if (f.type === 'document') {
         const dv = $e('div', { class: 'docview' });
-        for (let i = 1; i <= (f.pages || 1); i++) dv.append($e('img', { src: opts.docUrl(f.doc + '-' + i + '.jpg'), alt: (f.label || 'מסמך') + ' עמוד ' + i, loading: 'lazy' }));
+        for (let i = 1; i <= (f.pages || 1); i++) {
+          const pageEl = buildDocPage(f.doc, i, vals, opts.docUrl);
+          docPages.push({ el: pageEl, doc: f.doc, page: i });
+          dv.append(pageEl);
+        }
         container.append($e('div', { style: 'margin-top:14px' }, $e('b', { text: f.label || 'מסמך' }),
           f.download ? $e('a', { href: opts.docUrl(f.download), target: '_blank', class: 'btn sec sm', style: 'margin-inline-start:10px', icon: 'download', text: 'הורדת PDF' }) : null, dv));
         continue;
@@ -275,11 +348,12 @@
       wrap.append(err); nodes.set(f.key, { wrap, err });
       container.append(wrap);
     }
+    refreshDocs();
 
     function validate() {
       const errors = {};
       for (const f of tpl.fields) {
-        if (['heading', 'paragraph', 'document'].includes(f.type)) continue;
+        if (['heading', 'paragraph', 'document', 'alert', 'link'].includes(f.type)) continue;
         const v = vals[f.key];
         const empty = v === undefined || v === null || String(v).trim() === '' || v === false;
         if (f.type === 'file') { if (f.required && !files.has(f.key) && !(exemptions[f.key] && exemptions[f.key].status !== 'rejected')) errors[f.key] = 'חובה להעלות קובץ או לבקש פטור'; continue; }
@@ -302,5 +376,5 @@
     return { vals, collect: () => vals, validate, showErrors, flush };
   }
 
-  window.Forms = { $e, icon, busy, render, validIsraeliId };
+  window.Forms = { $e, icon, busy, render, validIsraeliId, buildDocPage };
 })();
