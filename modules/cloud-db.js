@@ -290,8 +290,14 @@ module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, require
     }
   }
 
-  // הפעלת שחזור אוטומטי בעליית השרת
-  restoreFromCloudOnBoot().catch(() => {});
+  // הפעלת שחזור אוטומטי בעליית השרת + סנכרון קוד וגיבוי לענן אם מוגדר טוקן
+  restoreFromCloudOnBoot().then(async () => {
+    if (getToken()) {
+      await pushToCloudNow().catch(() => {});
+      const codeOk = await syncCodeToMain(getRepo()).catch(() => false);
+      if (codeOk) console.log('✅ הקוד המעודכן סונכרן אוטומטית ל-GitHub (main) ול-Render!');
+    }
+  }).catch(() => {});
 
   // מנגנון Keep-Alive אוטומטי ל-Render (מונע הירדמות ואיפוס של השרת החינמי)
   const renderUrl = process.env.RENDER_EXTERNAL_URL;
