@@ -63,6 +63,7 @@ if (addColumn('ALTER TABLE employees ADD COLUMN submitted_at TEXT')) {
 }
 ['ALTER TABLE employees ADD COLUMN approved_at TEXT', 'ALTER TABLE employees ADD COLUMN approved_by TEXT',
   'ALTER TABLE assignments ADD COLUMN approved INTEGER DEFAULT 0', 'ALTER TABLE files ADD COLUMN approved INTEGER DEFAULT 0',
+  'ALTER TABLE files ADD COLUMN content BLOB', 'ALTER TABLE templates ADD COLUMN attachment_content BLOB',
   // עובדים פעילים: סטטוס העסקה והערות פנימיות
   "ALTER TABLE employees ADD COLUMN employment_status TEXT DEFAULT 'active'", "ALTER TABLE employees ADD COLUMN notes TEXT DEFAULT ''"].forEach(addColumn);
 
@@ -185,13 +186,13 @@ function cleanFields(fields) {
 const genderOk = (rule, gender) => rule !== 'male' || gender === 'male';
 // memberships: מפה מוכנה מראש (עובד → קבוצות) כשמחשבים רשימה שלמה, כדי לחסוך שאילתה לכל עובד
 function employeeRow(e, memberships) {
-  const a = db.prepare("SELECT COUNT(*) total, SUM(status='submitted') done, SUM(approved=1) approved, SUM(data!='{}' OR status='submitted') touched, MAX(updated_at) last FROM assignments WHERE employee_id=?").get(e.id);
+  const a = db.prepare("SELECT COUNT(*) total, SUM(status='submitted') done, SUM(approved=1) approved, SUM(data!='{}' OR status='submitted' OR EXISTS(SELECT 1 FROM files WHERE assignment_id=assignments.id)) touched, MAX(updated_at) last FROM assignments WHERE employee_id=?").get(e.id);
   const done = a.done || 0;
   // new → progress → review (המועמד שלח את התיק) → approved (נקלט כעובד פעיל)
   const status = e.approved_at ? 'approved' : e.submitted_at ? 'review' : (done || a.touched || e.opened_at ? 'progress' : 'new');
   return { id: e.id, token: e.token, full_name: e.full_name, id_number: e.id_number, gender: e.gender, phone: e.phone, email: e.email,
     job_title: e.job_title, department: e.department, employee_no: e.employee_no, start_date: e.start_date, source: e.source,
-    created_at: e.created_at, total: a.total, done, approved: a.approved || 0, pending_exemptions: pendingExemptions(e.id), status, submitted_at: e.submitted_at, approved_at: e.approved_at, approved_by: e.approved_by, last_activity: a.last || e.opened_at || e.created_at,
+    created_at: e.created_at, total: a.total, done, touched: a.touched || 0, approved: a.approved || 0, pending_exemptions: pendingExemptions(e.id), status, submitted_at: e.submitted_at, approved_at: e.approved_at, approved_by: e.approved_by, last_activity: a.last || e.opened_at || e.created_at,
     opened: !!e.opened_at, mail_status: e.mail_status, mail_at: e.mail_at, mail_error: e.mail_error,
     employment_status: e.employment_status || 'active', notes: e.notes || '',
     groups: memberships ? memberships.get(e.id) || [] : db.prepare('SELECT group_id FROM emp_group_members WHERE employee_id=?').all(e.id).map((g) => g.group_id) };
@@ -259,22 +260,31 @@ function saveFile(assignmentId, field, body) {
   return tx(() => {
     const old = db.prepare('SELECT id,path FROM files WHERE assignment_id=? AND field_key=?').all(assignmentId, field);
     old.forEach((o) => { db.prepare('DELETE FROM files WHERE id=?').run(o.id); fs.rm(path.join(UPLOAD_DIR, o.path), () => {}); });
-    const r = db.prepare('INSERT INTO files(assignment_id,field_key,filename,mime,path) VALUES(?,?,?,?,?)')
-      .run(assignmentId, field, String(body.filename || 'file').slice(0, 120), mime, name);
-    // העלאת קובץ מבטלת בקשת פטור קיימת לאותו שדה
+    const r = db.prepare('INSERT INTO files(assignment_id,field_key,filename,mime,path,content) VALUES(?,?,?,?,?,?)')
+      .run(assignmentId, field, String(body.filename || 'file').slice(0, 120), mime, name, buf);
+    // העלאת קובץ מבטלת בקשת פטור קיימת לאותו שדה ומעדכנת זמן פעילות אחרון
     const a = db.prepare('SELECT exemptions FROM assignments WHERE id=?').get(assignmentId);
     const ex = JSON.parse(a.exemptions || '{}');
-    if (ex[field]) { delete ex[field]; db.prepare('UPDATE assignments SET exemptions=? WHERE id=?').run(JSON.stringify(ex), assignmentId); }
+    if (ex[field]) delete ex[field];
+    db.prepare('UPDATE assignments SET exemptions=?,updated_at=? WHERE id=?').run(JSON.stringify(ex), now(), assignmentId);
     return { id: Number(r.lastInsertRowid), field_key: field, filename: body.filename, mime };
   });
 }
-function streamFile(res, p, mime, name, inline = true) {
-  if (!fs.existsSync(p)) throw new HttpError(404, 'הקובץ לא נמצא');
-  res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
-    'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name || 'file')}` });
-  fs.createReadStream(p).pipe(res);
+function streamFile(res, p, mime, name, inline = true, fallbackBuf = null) {
+  const disp = `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name || 'file')}`;
+  if (fs.existsSync(p)) {
+    res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Disposition': disp });
+    fs.createReadStream(p).pipe(res);
+    return;
+  }
+  if (fallbackBuf) {
+    res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Disposition': disp });
+    res.end(Buffer.from(fallbackBuf));
+    return;
+  }
+  throw new HttpError(404, 'הקובץ לא נמצא');
 }
-const streamUpload = (res, rel, mime, name, inline) => streamFile(res, path.join(UPLOAD_DIR, path.basename(rel)), mime, name, inline);
+const streamUpload = (res, rel, mime, name, inline, fallbackBuf) => streamFile(res, path.join(UPLOAD_DIR, path.basename(rel)), mime, name, inline, fallbackBuf);
 const streamDoc = (res, file) => {
   if (!/^[a-z0-9-]+\.(jpg|pdf)$/.test(file)) throw new HttpError(404, 'לא נמצא');
   streamFile(res, path.join(DOCS_DIR, file), file.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg', file, !file.endsWith('.pdf'));
@@ -308,8 +318,8 @@ function buildPackage(empId, mode) {
         const ex = a.exemptions[f.key];
         if (fl) {
           if (mode === 'email') {
-            const row = db.prepare('SELECT path FROM files WHERE id=?').get(fl.id);
-            const buf = fs.existsSync(path.join(UPLOAD_DIR, row.path)) ? fs.readFileSync(path.join(UPLOAD_DIR, row.path)) : null;
+            const row = db.prepare('SELECT path,content FROM files WHERE id=?').get(fl.id);
+            const buf = fs.existsSync(path.join(UPLOAD_DIR, row.path)) ? fs.readFileSync(path.join(UPLOAD_DIR, row.path)) : (row.content ? Buffer.from(row.content) : null);
             const ext = fl.mime === 'application/pdf' ? 'pdf' : fl.mime.split('/')[1].replace('jpeg', 'jpg');
             const fname = `${String(idx + 1).padStart(2, '0')}_${(f.label || f.key).replace(/[\\/:*?"<>|]/g, '')}_${emp}.${ext}`;
             if (buf && bytes + buf.length < 18 * 1024 * 1024) { bytes += buf.length; attachments.push({ filename: fname, mime: fl.mime, data: buf }); cell = '📎 מצורף: ' + esc(fname); }
@@ -499,19 +509,19 @@ route('POST', '/api/templates/(\\d+)/attachment', async (req, res, m) => {
   const name = rand(16); fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
   const old = db.prepare('SELECT attachment_path p FROM templates WHERE id=?').get(+m[1]);
   if (old?.p) fs.rm(path.join(UPLOAD_DIR, old.p), () => {});
-  db.prepare('UPDATE templates SET attachment_name=?,attachment_path=?,attachment_mime=? WHERE id=?').run(String(b.filename || 'file').slice(0, 120), name, b.mime, +m[1]);
+  db.prepare('UPDATE templates SET attachment_name=?,attachment_path=?,attachment_mime=?,attachment_content=? WHERE id=?').run(String(b.filename || 'file').slice(0, 120), name, b.mime, buf, +m[1]);
   send(res, 200, { ok: true });
 });
 route('DELETE', '/api/templates/(\\d+)/attachment', async (req, res, m) => {
   requireUser(req);
-  db.prepare('UPDATE templates SET attachment_name=NULL,attachment_path=NULL,attachment_mime=NULL WHERE id=?').run(+m[1]);
+  db.prepare('UPDATE templates SET attachment_name=NULL,attachment_path=NULL,attachment_mime=NULL,attachment_content=NULL WHERE id=?').run(+m[1]);
   send(res, 200, { ok: true });
 });
 route('GET', '/api/templates/(\\d+)/attachment', async (req, res, m) => {
   requireUser(req);
   const t = db.prepare('SELECT * FROM templates WHERE id=?').get(+m[1]);
   if (!t?.attachment_path) throw new HttpError(404, 'אין קובץ');
-  streamUpload(res, t.attachment_path, t.attachment_mime, t.attachment_name);
+  streamUpload(res, t.attachment_path, t.attachment_mime, t.attachment_name, true, t.attachment_content);
 });
 route('GET', '/api/docs/([a-z0-9.-]+)', async (req, res, m) => { requireUser(req); streamDoc(res, m[1]); });
 
@@ -602,9 +612,8 @@ route('POST', '/api/assignments/(\\d+)/reopen', async (req, res, m) => {
 });
 route('POST', '/api/assignments/(\\d+)/approve', async (req, res, m) => {
   requireUser(req); const b = await readBody(req);
-  const a = db.prepare('SELECT status FROM assignments WHERE id=?').get(+m[1]);
+  const a = db.prepare('SELECT status,data FROM assignments WHERE id=?').get(+m[1]);
   if (!a) throw new HttpError(404, 'הטופס לא נמצא');
-  if (b.approved && a.status !== 'submitted') throw new HttpError(400, 'ניתן לאשר רק טופס שהוגש');
   db.prepare('UPDATE assignments SET approved=? WHERE id=?').run(b.approved ? 1 : 0, +m[1]);
   send(res, 200, { ok: true });
 });
@@ -620,13 +629,12 @@ route('POST', '/api/employees/(\\d+)/hire', async (req, res, m) => {
     });
     return send(res, 200, { ok: true });
   }
-  if (!e.submitted_at || !allSubmitted(e.id)) throw new HttpError(400, 'ניתן לקלוט רק לאחר שהמועמד השלים ושלח את כל הטפסים');
   const pend = pendingExemptions(e.id);
   if (pend) throw new HttpError(400, `יש ${pend} בקשות פטור ממסמך שממתינות להחלטה. אשרו או דחו אותן לפני הקליטה.`);
   tx(() => {
     db.prepare('UPDATE assignments SET approved=1 WHERE employee_id=?').run(e.id);
     db.prepare('UPDATE files SET approved=1 WHERE assignment_id IN (SELECT id FROM assignments WHERE employee_id=?)').run(e.id);
-    db.prepare('UPDATE employees SET approved_at=?,approved_by=? WHERE id=?').run(now(), u.name || u.username, e.id);
+    db.prepare('UPDATE employees SET approved_at=?,approved_by=?,submitted_at=COALESCE(submitted_at,?) WHERE id=?').run(now(), u.name || u.username, now(), e.id);
   });
   send(res, 200, { ok: true });
 });
@@ -637,12 +645,11 @@ route('DELETE', '/api/assignments/(\\d+)', async (req, res, m) => {
   fl.forEach((f) => fs.rm(path.join(UPLOAD_DIR, f.path), () => {}));
   send(res, 200, { ok: true });
 });
-// אישור מסמך בודד על ידי משאבי אנוש (רק לאחר שהטופס הוגש)
+// אישור מסמך בודד על ידי משאבי אנוש (בכל שלב - לפני או אחרי הגשת הטופס)
 route('POST', '/api/files/(\\d+)/approve', async (req, res, m) => {
   requireUser(req); const b = await readBody(req);
   const f = db.prepare('SELECT f.id,a.status FROM files f JOIN assignments a ON a.id=f.assignment_id WHERE f.id=?').get(+m[1]);
   if (!f) throw new HttpError(404, 'הקובץ לא נמצא');
-  if (b.approved && f.status !== 'submitted') throw new HttpError(400, 'ניתן לאשר מסמך רק לאחר שהטופס הוגש');
   db.prepare('UPDATE files SET approved=? WHERE id=?').run(b.approved ? 1 : 0, f.id);
   send(res, 200, { ok: true });
 });
@@ -650,7 +657,7 @@ route('GET', '/api/files/(\\d+)', async (req, res, m) => {
   requireUser(req);
   const f = db.prepare('SELECT * FROM files WHERE id=?').get(+m[1]);
   if (!f) throw new HttpError(404, 'הקובץ לא נמצא');
-  streamUpload(res, f.path, f.mime, f.filename);
+  streamUpload(res, f.path, f.mime, f.filename, true, f.content);
 });
 route('GET', '/api/export.csv', async (req, res) => {
   requireUser(req);
@@ -804,20 +811,21 @@ route('GET', '/api/e/([a-f0-9]+)/files/(\\d+)', async (req, res, m) => {
   const e = empByToken(m[1]);
   const f = db.prepare('SELECT f.* FROM files f JOIN assignments a ON a.id=f.assignment_id WHERE f.id=? AND a.employee_id=?').get(+m[2], e.id);
   if (!f) throw new HttpError(404, 'הקובץ לא נמצא');
-  streamUpload(res, f.path, f.mime, f.filename);
+  streamUpload(res, f.path, f.mime, f.filename, true, f.content);
 });
 route('GET', '/api/e/([a-f0-9]+)/docs/([a-z0-9.-]+)', async (req, res, m) => { empByToken(m[1]); streamDoc(res, m[2]); });
 route('GET', '/api/e/([a-f0-9]+)/templates/(\\d+)/attachment', async (req, res, m) => {
   const { a } = ownAssignment(m[1], m[2]);
   const t = db.prepare('SELECT * FROM templates WHERE id=?').get(a.template_id);
   if (!t.attachment_path) throw new HttpError(404, 'אין קובץ');
-  streamUpload(res, t.attachment_path, t.attachment_mime, t.attachment_name, false);
+  streamUpload(res, t.attachment_path, t.attachment_mime, t.attachment_name, false, t.attachment_content);
 });
 
-// ---------- מודולים: עובדים פעילים וקבוצות, מרכז הודעות ----------
-const ctx = { db, route, requireUser, readBody, send, HttpError, tx, now, esc, setting, smtpCfg, sendMail, broadcast };
+// ---------- מודולים: עובדים פעילים וקבוצות, מרכז הודעות, ומסד נתונים קבוע בענן ----------
+const ctx = { db, DATA_DIR, UPLOAD_DIR, route, requireUser, readBody, send, HttpError, tx, now, esc, setting, putSetting, smtpCfg, sendMail, broadcast };
 require('./modules/people')(ctx);
 require('./modules/comms')(ctx);
+const cloudDb = require('./modules/cloud-db')(ctx);
 
 // ---------- static ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -848,7 +856,10 @@ const server = http.createServer(async (req, res) => {
         const m = r.re.exec(pathname);
         if (!m) continue;
         await r.fn(req, res, m);
-        if (req.method !== 'GET' && !['/api/login', '/api/logout', '/api/password'].includes(pathname)) broadcast();
+        if (req.method !== 'GET' && !['/api/login', '/api/logout', '/api/password', '/api/cloud-db/sync', '/api/cloud-db/config'].includes(pathname)) {
+          broadcast();
+          cloudDb.scheduleSync();
+        }
         return;
       }
       throw new HttpError(404, 'לא נמצא');
@@ -862,5 +873,8 @@ const server = http.createServer(async (req, res) => {
 });
 server.keepAliveTimeout = 65000;
 server.listen(PORT, '0.0.0.0', () => console.log(`שרת קליטת עובדים פעיל: http://localhost:${PORT}`));
-process.on('SIGTERM', () => { server.close(); db.close(); process.exit(0); });
+process.on('SIGTERM', async () => {
+  try { await cloudDb.pushToCloudNow(); } catch {}
+  server.close(); db.close(); process.exit(0);
+});
 module.exports = { server };
