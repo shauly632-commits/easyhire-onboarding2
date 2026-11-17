@@ -2,7 +2,8 @@
    לוח הקליטה (טבלה בקבוצות וקנבן), תיק עובד, פטורים, סל טפסים, סימולטור והגדרות */
 const { $e, icon, busy } = Forms;
 const root = document.getElementById('root');
-let me = null, view = 'pipeline', list = [], groups = [], cfg = { capacity: 180 }, pendingEx = 0, tplCount = 0, simTarget = '', simDevice = 'phone';
+let me = null, view = 'pipeline', list = [], groups = [], departments = [], cfg = { capacity: 180 }, pendingEx = 0, tplCount = 0, simTarget = '', simDevice = 'phone';
+const allDeptsList = () => [...new Set([...departments, ...list.map((e) => e.department)].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'he'));
 let detailId = null, detailTab = '', quietRender = false, renderSeq = 0, navOpen = false;
 const pref = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const setPref = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
@@ -154,8 +155,8 @@ function shell({ title, sub, actions = [] }, ...body) {
   quietRender = false;
 }
 async function refreshMeta() {
-  const [l, ex, t, g] = await Promise.all([api('/employees'), api('/exemptions'), api('/templates'), api('/groups')]);
-  list = l; groups = g; pendingEx = ex.filter((x) => x.status === 'pending').length; tplCount = t.length;
+  const [l, ex, t, g, d] = await Promise.all([api('/employees'), api('/exemptions'), api('/templates'), api('/groups'), api('/departments').catch(() => [])]);
+  list = l; groups = g; departments = Array.isArray(d) ? d : []; pendingEx = ex.filter((x) => x.status === 'pending').length; tplCount = t.length;
   return { ex, t };
 }
 const VIEWS = () => ({ pipeline: pipelineView, directory: directoryView, messages: messagesView, exemptions: exemptionsView, templates: templatesView, sim: simView, settings: settingsView, detail: () => employeeDetail(detailId) });
@@ -197,9 +198,10 @@ async function pipelineView() {
   if (seq !== renderSeq || view !== 'pipeline') return; // המשתמש עבר למסך אחר בזמן הטעינה
   const n = (s) => list.filter((e) => e.status === s).length;
   const [srch, q] = search(flt.q, 'חיפוש לפי שם, ת.ז., טלפון...');
-  const depts = [...new Set(list.map((e) => e.department).filter(Boolean))].sort();
-  const fd = $e('select', { 'aria-label': 'מחלקה' }, $e('option', { value: '', text: 'כל המחלקות' }), depts.map((d) => $e('option', { value: d, text: d })));
+  const depts = allDeptsList();
+  const fd = $e('select', { 'aria-label': 'מחלקה' }, $e('option', { value: '', text: 'כל המחלקות (' + depts.length + ')' }), depts.map((d) => $e('option', { value: d, text: d })), $e('option', { value: '__add__', text: '➕ הוספת מחלקה / דירה חדשה...' }));
   fd.value = depts.includes(flt.d) ? flt.d : '';
+  const deptBtn = $e('button', { class: 'btn ghost sm', icon: 'plus', title: 'הוספה וניהול של מחלקות / דירות / מסגרות', onclick: () => manageDepartmentsModal(pipelineView) }, 'מחלקות');
   const board = $e('div');
   const filtered = () => { const s = q.value.trim().toLowerCase(); return list.filter((e) => (!s || [e.full_name, e.phone, e.email, e.id_number, e.job_title].join(' ').toLowerCase().includes(s)) && (!flt.s || e.status === flt.s) && (!fd.value || e.department === fd.value)); };
   const ORDER = ['review', 'progress', 'new', 'approved'];
@@ -239,7 +241,12 @@ async function pipelineView() {
     if (!wrap.children.length) wrap.append(empty('search', list.length ? 'לא נמצאו תוצאות' : 'עדיין לא נוספו מועמדים. לחצו "מועמד חדש" או שלחו את קישור ההרשמה.'));
     board.append(wrap);
   };
-  q.addEventListener('input', draw); fd.addEventListener('input', draw); draw();
+  q.addEventListener('input', draw);
+  fd.addEventListener('change', () => {
+    if (fd.value === '__add__') { fd.value = flt.d || ''; manageDepartmentsModal(pipelineView); return; }
+    draw();
+  });
+  draw();
   const filterBy = (s) => () => { flt.s = flt.s === s ? '' : s; pipelineView(); };
   const cap = cfg.capacity, appr = n('approved');
   shell({ title: 'לוח קליטה', sub: (me.department ? 'דירה / מסגרת: ' + me.department + ' · ' : '') + 'מעקב חי אחר מילוי טפסים, חתימות ואישורים',
@@ -258,7 +265,7 @@ async function pipelineView() {
       kpi('search', 'var(--c-purple)', 'ממתינים לאישור', n('review'), 'שלחו תיק מלא לבדיקה', { run: filterBy('review'), on: flt.s === 'review' }),
       kpi('userCheck', 'var(--c-green)', 'נקלטו', appr, (list.length ? Math.round(100 * appr / list.length) : 0) + '% מהמועמדים', { run: filterBy('approved'), on: flt.s === 'approved' })),
     $e('div', { class: 'board' },
-      $e('div', { class: 'tools' }, srch, fd, flt.s ? $e('button', { class: 'gchip on', style: '--gc:' + STATUS[flt.s][1], onclick: filterBy(flt.s) }, STATUS[flt.s][0], ' ✕') : null, $e('span', { class: 'sp' }),
+      $e('div', { class: 'tools' }, srch, fd, deptBtn, flt.s ? $e('button', { class: 'gchip on', style: '--gc:' + STATUS[flt.s][1], onclick: filterBy(flt.s) }, STATUS[flt.s][0], ' ✕') : null, $e('span', { class: 'sp' }),
         viewSwitch(boardMode, (k) => { boardMode = k; setPref('boardMode', k); draw(); }),
         $e('a', { class: 'btn sec sm', href: '/api/export-payroll.csv', icon: 'download', title: 'ייצוא נתוני טופס 101, בנק ופנסיה לתוכנת השכר', text: 'ייצוא 101 לשכר' }),
         $e('a', { class: 'btn ghost sm', href: '/api/export.csv', icon: 'download', text: 'ייצוא כללי' })),
@@ -300,18 +307,71 @@ async function smartRemindersModal() {
       $e('button', { class: 'btn ghost', text: 'סגירה', onclick: () => m.remove() }))), true);
 }
 
+// ניהול מחלקות / דירות / מסגרות (יצירה, שינוי שם ומחיקה)
+function manageDepartmentsModal(after) {
+  const box = $e('div');
+  const inp = $e('input', { type: 'text', placeholder: 'שם מחלקה / דירה / מסגרת חדשה...', style: 'flex:1' });
+  const drawList = () => {
+    box.textContent = '';
+    const depts = allDeptsList();
+    if (!depts.length) { box.append($e('p', { class: 'muted', text: 'עדיין לא הוגדרו מחלקות או דירות. הוסיפו מחלקה ראשונה למעלה.' })); return; }
+    depts.forEach((d) => {
+      const cnt = list.filter((e) => e.department === d).length;
+      box.append($e('div', { class: 'rrow' },
+        $e('span', { class: 'ic', style: 'background:var(--priBg);color:var(--pri);width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center' }, icon('building')),
+        $e('div', { class: 'tx' }, $e('b', { text: d }), $e('small', { text: cnt + ' עובדים/מועמדים משויכים' })),
+        $e('button', { class: 'btn ghost sm', icon: 'pen', text: 'שינוי שם', onclick: guard(async () => {
+          const next = prompt('שם חדש עבור "' + d + '":', d);
+          if (!next || !next.trim() || next.trim() === d) return;
+          const r = await api('/departments', 'PUT', { old_name: d, new_name: next.trim() });
+          departments = r.departments; await refreshMeta(); drawList(); toast('שם המחלקה עודכן ✓');
+        }) }),
+        $e('button', { class: 'btn ghost sm', icon: 'trash', text: 'הסרה', onclick: guard(async () => {
+          if (!confirm('להסיר את המחלקה "' + d + '"?')) return;
+          const r = await api('/departments', 'DELETE', { name: d });
+          departments = r.departments; await refreshMeta(); drawList(); toast('המחלקה הוסרה ✓');
+        }) })));
+    });
+  };
+  const addDept = guard(async () => {
+    const v = inp.value.trim();
+    if (!v) return;
+    const r = await api('/departments', 'POST', { name: v });
+    departments = r.departments; inp.value = ''; drawList(); toast('המחלקה נוספה ✓');
+  });
+  inp.addEventListener('keydown', (ev) => ev.key === 'Enter' && addDept());
+  drawList();
+  const m = modal($e('div', {},
+    $e('h2', { icon: 'building', text: 'ניהול מחלקות / דירות / מסגרות' }),
+    $e('p', { class: 'muted', style: 'margin-top:0', text: 'צרו מחלקות, דירות או מסגרות חדשות כדי לשייך אליהן מועמדים, עובדים פעילים ורכזי דירות.' }),
+    $e('div', { class: 'row', style: 'gap:8px;margin-bottom:16px' }, inp, $e('button', { class: 'btn', icon: 'plus', text: 'הוספת מחלקה', onclick: addDept })),
+    $e('div', { style: 'max-height:360px;overflow:auto' }, box),
+    $e('div', { class: 'row', style: 'margin-top:16px;justify-content:flex-end' },
+      $e('button', { class: 'btn ghost', text: 'סגירה', onclick: () => { m.remove(); if (after) after(); } }))));
+  inp.focus();
+}
+
 const empForm = (e) => {
   const f = {};
   const mk = (k, label, type = 'text', extra = {}) => { f[k] = $e('input', { type, value: e?.[k] || '', ...extra }); return $e('div', {}, $e('label', { class: 'f', text: label }), f[k]); };
   f.gender = $e('select', {}, $e('option', { value: '', text: 'בחרו...' }), $e('option', { value: 'female', text: 'אישה' }), $e('option', { value: 'male', text: 'גבר' })); f.gender.value = e?.gender || '';
-  const depts = [...new Set(list.map((x) => x.department).filter(Boolean))];
+  const dl = $e('datalist', { id: 'deptlist' });
+  const syncDl = () => fill(dl, allDeptsList().map((d) => $e('option', { value: d })));
+  syncDl();
+  f.department = $e('input', { type: 'text', value: e?.department || '', list: 'deptlist', placeholder: 'בחרו מרשימה או הקלידו...' });
+  const addDeptQuick = $e('button', { type: 'button', class: 'btn sec sm', icon: 'plus', title: 'יצירת מחלקה / דירה חדשה', text: 'מחלקה חדשה', onclick: guard(async () => {
+    const v = prompt('הזינו שם מחלקה / דירה / מסגרת חדשה:');
+    if (!v || !v.trim()) return;
+    const r = await api('/departments', 'POST', { name: v.trim() });
+    departments = r.departments; syncDl(); f.department.value = v.trim(); toast('המחלקה נוספה ונבחרה ✓');
+  }) });
   const two = (...k) => $e('div', { class: 'pgrid', style: 'gap:0 12px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))' }, k);
   const node = $e('div', {}, mk('full_name', 'שם מלא *'),
     two(mk('id_number', 'תעודת זהות'), $e('div', {}, $e('label', { class: 'f', text: 'מגדר * (קובע את טופס המשטרה)' }), f.gender)),
     two(mk('phone', 'טלפון נייד', 'tel'), mk('email', 'דוא"ל', 'email')),
-    two(mk('job_title', 'תפקיד'), mk('department', 'מחלקה / מקום עבודה', 'text', { list: 'deptlist' })),
+    two(mk('job_title', 'תפקיד'), $e('div', {}, $e('div', { class: 'row', style: 'justify-content:space-between;margin:16px 0 6px' }, $e('label', { class: 'f', style: 'margin:0', text: 'מחלקה / דירה / מסגרת' }), addDeptQuick), f.department)),
     two(mk('employee_no', 'מספר עובד'), mk('start_date', 'תאריך תחילת עבודה', 'date')),
-    $e('datalist', { id: 'deptlist' }, depts.map((d) => $e('option', { value: d }))));
+    dl);
   return { node, vals: () => Object.fromEntries(Object.entries(f).map(([k, i]) => [k, i.value])) };
 };
 async function newEmployee() {
@@ -662,39 +722,10 @@ async function settingsView() {
         $e('div', { class: 'row', style: 'flex-wrap:wrap;gap:8px' }, nu.username, nu.name, nu.password, nu.department),
         $e('datalist', { id: 'deptlist_u' }, allDepts.map((d) => $e('option', { value: d }))),
         $e('button', { class: 'btn', style: 'margin-top:12px', text: 'הוספת משתמש', onclick: guard(async () => { await api('/users', 'POST', { username: nu.username.value, name: nu.name.value, password: nu.password.value, department: nu.department.value }); toast('המשתמש נוסף ✓'); settingsView(); }) })),
+      $e('div', { class: 'card' }, $e('h3', { icon: 'building', text: 'ניהול מחלקות / דירות / מסגרות' }),
+        $e('p', { class: 'muted', style: 'margin-top:0', text: 'יצירה ועריכה של קטגוריות המחלקות, הדירות והמסגרות בארגון (לשיוך מועמדים, עובדים ורכזי דירות).' }),
+        $e('div', { class: 'chips', style: 'margin-bottom:12px' }, allDeptsList().length ? allDeptsList().map((d) => $e('span', { class: 'chip pri', text: d })) : $e('span', { class: 'muted', text: 'עדיין לא הוגדרו מחלקות' })),
+        $e('button', { class: 'btn sec', icon: 'plus', text: 'הוספה וניהול מחלקות / דירות', onclick: () => manageDepartmentsModal(settingsView) })),
       $e('div', { class: 'card' }, $e('h3', { icon: 'lock', text: 'החלפת סיסמה' }), row('סיסמה נוכחית', pw.current), row('סיסמה חדשה (8+ תווים)', pw.next),
-        $e('button', { class: 'btn', style: 'margin-top:14px', text: 'עדכון', onclick: guard(async () => { await api('/password', 'POST', { current: pw.current.value, next: pw.next.value }); pw.current.value = pw.next.value = ''; toast('הסיסמה עודכנה ✓'); }) })),
-      $e('div', { class: 'card' }, $e('h3', { icon: 'file', text: 'הצעת מחיר לתחזוקה שוטפת ותמיכה' }),
-        $e('p', { class: 'muted', style: 'margin-top:0', text: 'פירוט חבילות תחזוקה שוטפת, גיבויים בענן, עדכוני טפסים ורגולציה ותמיכה טכנית עבור אודי מרילי פתרונות תעסוקה יצירתיים בע"מ.' }),
-        $e('button', { class: 'btn sec', icon: 'eye', text: 'צפייה והדפסת הצעת מחיר לתחזוקה שוטפת', onclick: quoteModal }))));
-}
-
-function quoteModal() {
-  const m = modal($e('div', {},
-    $e('div', { class: 'row', style: 'justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:14px' },
-      $e('div', {}, $e('h2', { style: 'margin:0', text: 'הצעת מחיר מנצחת – מערכת EasyHire ותחזוקה שוטפת' }), $e('small', { class: 'muted', text: 'לכבוד: אודי מרילי פתרונות תעסוקה יצירתיים בע"מ (תיק ניכויים 941707242) · לידי יפעת' })),
-      $e('button', { class: 'btn sec sm noprint', icon: 'printer', text: 'הדפסה', onclick: () => window.print() })),
-    $e('div', { class: 'para', style: 'background:#f8faff;border:1px solid #d6e4ff;margin-bottom:14px' },
-      'מערכת EasyHire מותאמת 100% באופן אישי לאודי מרילי: כוללת את כל טפסי הקליטה המקוונים (101 מקוון + ייצוא לתוכנת שכר, משטרה, טופס קוביות פנסיה, הסכם עבודה, סעיף 14 ושמירת סודיות עם חתימה על גבי המסמך), ספריית עובדים פעילים, מרכז הודעות וואטסאפ/מייל, גיבוי מוצפן קבוע בענן והדפסת תיק עובד מלא.'),
-    $e('h3', { text: 'יתרונות בלעדיים (ללא המגבלות של מערכות מתחרות):' }),
-    $e('ul', { style: 'line-height:1.8;padding-inline-start:20px;margin:0 0 16px' },
-      $e('li', { text: 'ללא הגבלת שליחות בחודש וללא חיוב על הודעות וואטסאפ (לעומת מגבלת 50 שליחות ותשלום על SMS אצל מתחרים).' }),
-      $e('li', { text: 'משתמשי ניהול (HR / הנהלה / רכזים) ללא הגבלה וללא תוספת תשלום (לעומת משתמש מנהל 1 בלבד אצל מתחרים).' }),
-      $e('li', { text: 'גיבוי ענן מוצפן אוטומטי באחריות המערכת + ייצוא מלא בלחיצה אחת.' }),
-      $e('li', { text: 'ייצוא נתוני 101, בנק ופנסיה מוכן לקליטה בתוכנת השכר + הדפסת תיק עובד מלא כולל כל הנספחים.' }),
-      $e('li', { text: '0 ₪ עלות הקמה והטמעה – המערכת כבר מוקמת, מוטמעת ומותאמת מלא לטפסים של אודי מרילי!' })),
-    $e('h3', { text: 'מסלולי רישוי ותחזוקה שוטפת לבחירה (לפני מע"מ):' }),
-    $e('div', { class: 'pgrid', style: 'grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:16px' },
-      $e('div', { class: 'card', style: 'border:2px solid var(--c-green);padding:16px;background:#f4fcf8' },
-        $e('span', { class: 'chip ok', text: 'הצעה מנצחת · חיסכון של 60%+ בשנה א׳' }),
-        $e('h3', { style: 'margin:8px 0 4px', text: '140 ₪ / חודש (1,680 ₪ לשנה)' }),
-        $e('div', { style: 'font-weight:700;color:var(--ok);font-size:.9rem;margin-bottom:6px', text: '0 ₪ דמי הקמה והטמעה!' }),
-        $e('small', { class: 'muted', text: 'כולל הכל ללא הגבלה: עובדים ללא הגבלה, שליחות ללא הגבלה, מנהלים ללא הגבלה, גיבוי ענן מוצפן קבוע ועדכון שנתי של טופס 101.' })),
-      $e('div', { class: 'card', style: 'border:2px solid var(--pri);padding:16px;background:#f7faff' },
-        $e('span', { class: 'chip pri', text: 'מסלול פרימיום VIP + פיתוח שוטף' }),
-        $e('h3', { style: 'margin:8px 0 4px', text: '250 ₪ / חודש' }),
-        $e('div', { style: 'font-weight:700;color:var(--pri);font-size:.9rem;margin-bottom:6px', text: '0 ₪ דמי הקמה · ללא התחייבות שנתית' }),
-        $e('small', { class: 'muted', text: 'כולל הכל + פיתוח והתאמת טפסים ומסמכים חדשים לפי דרישת יפעת לאורך כל השנה (ללא חיוב של 300 ₪ לשעת הטמעה!) ותמיכה אישית ישירה בוואטסאפ.' }))),
-    $e('div', { class: 'row noprint', style: 'justify-content:flex-end' },
-      $e('button', { class: 'btn', text: 'סגירה', onclick: () => m.remove() }))), true);
+        $e('button', { class: 'btn', style: 'margin-top:14px', text: 'עדכון', onclick: guard(async () => { await api('/password', 'POST', { current: pw.current.value, next: pw.next.value }); pw.current.value = pw.next.value = ''; toast('הסיסמה עודכנה ✓'); }) }))));
 }

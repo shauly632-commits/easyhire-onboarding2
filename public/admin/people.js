@@ -95,8 +95,9 @@ async function directoryView() {
   if (dflt.g && !groupById(dflt.g)) dflt.g = 0;
   const [srch, q] = search(dflt.q, 'חיפוש עובד...');
   const sel = (opts, val, label) => { const s = $e('select', { 'aria-label': label }, Object.entries(opts).map(([k, v]) => $e('option', { value: k, text: v }))); s.value = val in opts ? val : ''; return s; };
-  const depts = [...new Set(staff.map((e) => e.department).filter(Boolean))].sort();
-  const fd = sel({ '': 'כל המחלקות', ...Object.fromEntries(depts.map((d) => [d, d])) }, dflt.d, 'מחלקה');
+  const depts = allDeptsList();
+  const fd = sel({ '': 'כל המחלקות (' + depts.length + ')', ...Object.fromEntries(depts.map((d) => [d, d])), '__add__': '➕ הוספת מחלקה / דירה חדשה...' }, dflt.d, 'מחלקה');
+  const deptBtn = $e('button', { class: 'btn ghost sm', icon: 'plus', title: 'הוספה וניהול של מחלקות / דירות / מסגרות', onclick: () => manageDepartmentsModal(directoryView) }, 'מחלקות');
   const fes = sel({ '': 'כל הסטטוסים', ...Object.fromEntries(Object.entries(EMP_STATUS).map(([k, v]) => [k, v[0]])) }, dflt.es, 'סטטוס העסקה');
   const ft = sel(TENURE, dflt.t, 'ותק');
   const by = sel({ department: 'קיבוץ לפי מחלקה', employment: 'קיבוץ לפי סטטוס', none: 'ללא קיבוץ' }, dflt.by, 'קיבוץ'); if (!by.value) by.value = 'department';
@@ -175,7 +176,11 @@ async function directoryView() {
     if (!wrap.children.length) wrap.append(empty('search', 'לא נמצאו עובדים שמתאימים לסינון'));
     board.append(wrap); bulk();
   };
-  [q, fd, fes, ft, by].forEach((x) => x.addEventListener('input', draw));
+  [q, fes, ft, by].forEach((x) => x.addEventListener('input', draw));
+  fd.addEventListener('change', () => {
+    if (fd.value === '__add__') { fd.value = dflt.d || ''; manageDepartmentsModal(directoryView); return; }
+    draw();
+  });
   const gchips = $e('div', { class: 'gbar' }, $e('span', { class: 'muted', style: 'font-size:.85rem', icon: 'layers', text: 'קבוצות:' }),
     $e('button', { class: 'gchip' + (dflt.g ? '' : ' on'), style: '--gc:var(--ink)', onclick: () => { dflt.g = 0; directoryView(); } }, 'כולם', $e('small', { text: staff.length })),
     groups.map((g) => $e('button', { class: 'gchip' + (dflt.g === g.id ? ' on' : ''), style: '--gc:' + g.color, onclick: () => { dflt.g = dflt.g === g.id ? 0 : g.id; directoryView(); }, oncontextmenu: (ev) => { ev.preventDefault(); groupModal(g, () => directoryView()); } },
@@ -194,7 +199,7 @@ async function directoryView() {
       kpi('clock', 'var(--c-orange)', 'בהודעה מוקדמת', cntS('notice'), 'לקראת סיום העסקה', { run: fS('notice'), on: dflt.es === 'notice' }),
       kpi('sparkles', 'var(--c-purple)', 'הצטרפו החודש', by30, 'ב-30 הימים האחרונים')),
     $e('div', { class: 'board' }, gchips,
-      $e('div', { class: 'tools' }, srch, fd, fes, ft, by, $e('span', { class: 'sp' }),
+      $e('div', { class: 'tools' }, srch, fd, deptBtn, fes, ft, by, $e('span', { class: 'sp' }),
         viewSwitch(dirMode, (k) => { dirMode = k; setPref('dirMode', k); draw(); })),
       board),
     bulkBox);

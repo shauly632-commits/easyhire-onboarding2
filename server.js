@@ -580,6 +580,48 @@ route('POST', '/api/settings/test-mail', async (req, res) => {
   } catch (e) { throw new HttpError(400, 'השליחה נכשלה: ' + e.message); }
 });
 
+// ניהול מחלקות / דירות / מסגרות (יצירה, עריכת שם ומחיקה על ידי יפעת)
+function getDepartments() {
+  let saved = [];
+  try { saved = JSON.parse(setting('departments') || '[]'); } catch { saved = []; }
+  const fromEmps = db.prepare("SELECT DISTINCT department FROM employees WHERE archived=0 AND department!=''").all().map((r) => r.department);
+  return [...new Set([...saved, ...fromEmps].map((s) => String(s || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'he'));
+}
+route('GET', '/api/departments', async (req, res) => {
+  requireUser(req);
+  send(res, 200, getDepartments());
+});
+route('POST', '/api/departments', async (req, res) => {
+  requireUser(req); const b = await readBody(req);
+  const name = String(b.name || '').trim().slice(0, 80);
+  if (!name) throw new HttpError(400, 'יש להזין שם מחלקה / דירה / מסגרת');
+  const next = [...new Set([...getDepartments(), name])].sort((a, c) => a.localeCompare(c, 'he'));
+  putSetting('departments', JSON.stringify(next));
+  send(res, 200, { ok: true, departments: next });
+});
+route('PUT', '/api/departments', async (req, res) => {
+  requireUser(req); const b = await readBody(req);
+  const oldName = String(b.old_name || '').trim(), newName = String(b.new_name || '').trim().slice(0, 80);
+  if (!oldName || !newName) throw new HttpError(400, 'יש להזין שם תקין');
+  tx(() => {
+    db.prepare('UPDATE employees SET department=? WHERE department=?').run(newName, oldName);
+    db.prepare('UPDATE users SET department=? WHERE department=?').run(newName, oldName);
+    const next = [...new Set(getDepartments().map((d) => (d === oldName ? newName : d)))].sort((a, c) => a.localeCompare(c, 'he'));
+    putSetting('departments', JSON.stringify(next));
+  });
+  send(res, 200, { ok: true, departments: getDepartments() });
+});
+route('DELETE', '/api/departments', async (req, res) => {
+  requireUser(req); const b = await readBody(req);
+  const name = String(b.name || '').trim();
+  let saved = [];
+  try { saved = JSON.parse(setting('departments') || '[]'); } catch { saved = []; }
+  const next = saved.filter((d) => d !== name);
+  putSetting('departments', JSON.stringify(next));
+  if (b.clear_employees !== false) db.prepare("UPDATE employees SET department='' WHERE department=?").run(name);
+  send(res, 200, { ok: true, departments: getDepartments() });
+});
+
 // templates (admin)
 route('GET', '/api/templates', async (req, res) => {
   requireUser(req);
