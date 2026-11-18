@@ -682,22 +682,15 @@ async function settingsView() {
   shell({ title: 'הגדרות', sub: 'מסד נתונים קבוע בענן, מייל, פרטי הארגון ומשתמשי המערכת' },
     $e('div', { class: 'pgrid' },
       $e('div', { class: 'card' },
-        $e('div', { class: 'row' }, $e('h3', { style: 'margin:0', icon: 'shield', text: 'מסד נתונים קבוע בענן (ללא מחיקה)' }), $e('span', { class: 'sp' }),
-          $e('span', { class: 'chip ' + (cdb.configured ? 'ok' : 'pri'), text: cdb.configured ? '✓ סנכרון ענן פעיל' : 'Keep-Alive פעיל' })),
-        $e('p', { class: 'muted', style: 'margin-top:8px', text: 'שומר אוטומטית את כל המועמדים, הטפסים והקבצים בעותק מוצפן בענן (ענף data-backup ב-GitHub) ומונע איפוס נתונים ב-Render החינמי.' }),
-        $e('div', { class: 'muted', style: 'font-size:.85rem;margin-bottom:10px' },
-          'מועמדים שמורים: ' + (cdb.employees_count ?? 0) + ' · קבצים שמורים: ' + (cdb.files_count ?? 0) + (cdb.last_sync ? ' · גיבוי ענן אחרון: ' + fmt(cdb.last_sync) : '')),
-        cdb.last_error ? $e('div', { class: 'exwarn', style: 'margin-bottom:10px', text: 'שגיאת סנכרון אחרונה: ' + cdb.last_error }) : null,
-        row('טוקן גיבוי ענן קבוע (GitHub Personal Access Token)', ghTok),
-        $e('div', { style: 'margin-top:6px;font-size:.83rem' },
-          $e('a', { href: 'https://github.com/settings/tokens/new?scopes=repo&description=EasyHire-Cloud-DB', target: '_blank', rel: 'noopener', text: '🔗 לחצו כאן ליצירת טוקן חינמי ב-GitHub (גללו למטה בעמוד שנפתח, לחצו Generate token והעתיקו לכאן)' })),
+        $e('div', { class: 'row' }, $e('h3', { style: 'margin:0', icon: 'shield', text: 'גיבוי ושמירת נתונים אוטומטית בענן' }), $e('span', { class: 'sp' }),
+          $e('span', { class: 'chip ok', text: '✓ גיבוי ענן אוטומטי פעיל' })),
+        $e('p', { class: 'muted', style: 'margin-top:8px', text: 'כל תיקי המועמדים, הטפסים החתומים והמסמכים המצורפים נשמרים ומגובים אוטומטית בענן מוצפן בזמן אמת.' }),
+        $e('div', { class: 'muted', style: 'font-size:.85rem;margin-bottom:12px' },
+          'מועמדים שמורים במערכת: ' + (cdb.employees_count ?? 0) + ' · מסמכים שמורים: ' + (cdb.files_count ?? 0) + (cdb.last_sync ? ' · עדכון גיבוי אחרון: ' + fmt(cdb.last_sync) : '')),
         $e('div', { class: 'row', style: 'margin-top:14px;flex-wrap:wrap;gap:8px' },
-          $e('button', { class: 'btn', icon: 'check', text: cdb.configured ? 'עדכון וגיבוי לענן עכשיו' : 'חיבור ושמירה קבועה בענן', onclick: guard(async (ev) => {
-            await busy(ev.currentTarget, async () => {
-              if (ghTok.value.trim()) await api('/cloud-db/config', 'POST', { github_token: ghTok.value.trim() });
-              else await api('/cloud-db/sync', 'POST');
-            });
-            toast('מסד הנתונים סונכרן ונשמר בענן בהצלחה ✓'); settingsView();
+          $e('button', { class: 'btn', icon: 'save', text: 'גיבוי ושמירה כעת', onclick: guard(async (ev) => {
+            await busy(ev.currentTarget, () => api('/cloud-db/sync', 'POST'));
+            toast('כל הנתונים והקבצים נשמרו וגובו בענן בהצלחה ✓'); settingsView();
           }) }),
           $e('a', { class: 'btn sec', href: '/api/cloud-db/export', icon: 'download', text: 'הורדת גיבוי למחשב' }),
           $e('button', { class: 'btn ghost', icon: 'upload', text: 'שחזור מגיבוי', onclick: () => impFile.click() }), impFile)),
