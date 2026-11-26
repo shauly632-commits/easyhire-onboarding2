@@ -63,9 +63,10 @@ function profileOverview(e, d, refresh, showForms) {
   notes.addEventListener('blur', () => { if (notes.value === saved) return; saved = notes.value; setProfile(e, { notes: notes.value }, () => toast('ההערה נשמרה ✓')); });
   const hist = d.assignments.map((a) => {
     const ok = a.status === 'submitted', signed = a.template.fields.some((f) => f.type === 'signature');
-    return $e('li', {}, $e('span', { class: 'tic' + (a.approved ? ' ok' : '') }, icon(a.approved ? 'checkCircle' : ok ? (signed ? 'pen' : 'file') : 'clock')),
-      $e('div', { class: 'tx' }, $e('b', { text: a.template.title }), $e('small', { text: ok ? (signed ? 'נחתם ' : 'הוגש ') + fmt(a.submitted_at) + (a.files.length ? ' · ' + a.files.length + ' מסמכים' : '') : 'טרם הוגש' })),
-      a.approved ? $e('span', { class: 'chip ok', text: 'אושר' }) : ok ? $e('span', { class: 'chip pur', text: 'ממתין לאישור' }) : $e('span', { class: 'chip gray', text: 'פתוח' }));
+    const exCnt = Object.keys(a.exemptions || {}).length;
+    return $e('li', {}, $e('span', { class: 'tic' + (a.approved && !exCnt ? ' ok' : '') }, icon(a.approved && !exCnt ? 'checkCircle' : exCnt ? 'alert' : ok ? (signed ? 'pen' : 'file') : 'clock')),
+      $e('div', { class: 'tx' }, $e('b', { text: a.template.title }), $e('small', { text: (ok ? (signed ? 'נחתם ' : 'הוגש ') + fmt(a.submitted_at) : 'טרם הוגש (חסר)') + (a.files.length ? ' · ' + a.files.length + ' מסמכים' : '') + (exCnt ? ' · ⚠️ קיים מסמך בחריגה/חסר' : '') })),
+      exCnt ? $e('span', { class: 'chip err', text: 'מסמך בחריגה/חסר' }) : a.approved ? $e('span', { class: 'chip ok', text: 'אושר' }) : ok ? $e('span', { class: 'chip pur', text: 'ממתין לאישור' }) : $e('span', { class: 'chip err', text: 'חסר' }));
   });
   const active = e.status === 'approved';
   return $e('div', { class: 'pgrid' },
@@ -131,6 +132,7 @@ async function directoryView() {
     $e('td', {}, e.job_title || '—'),
     $e('td', {}, e.department || '—'),
     $e('td', { class: 'c' }, empStatusPill(e, directoryView)),
+    $e('td', { style: 'min-width:170px' }, missingSummaryNode(e)),
     $e('td', { style: 'min-width:120px' }, groupTags(e.groups) || $e('span', { class: 'muted', text: '—' })),
     $e('td', { style: 'white-space:nowrap' }, $e('div', { text: tenure(e) }), $e('small', { class: 'muted', text: 'מ-' + fmtDate(startOf(e)) })),
     $e('td', {}, actions(e)));
@@ -139,7 +141,7 @@ async function directoryView() {
     const sync = () => { all.checked = rows.length > 0 && rows.every((e) => selected.has(e.id)); all.indeterminate = !all.checked && rows.some((e) => selected.has(e.id)); };
     all.addEventListener('change', () => { rows.forEach((e) => (all.checked ? selected.add(e.id) : selected.delete(e.id))); draw(); });
     const prev = syncAll; syncAll = () => { prev(); sync(); }; sync();
-    return $e('table', {}, $e('thead', {}, $e('tr', {}, $e('th', { class: 'chk' }, all), ['עובד/ת', 'תפקיד', 'מחלקה', 'סטטוס העסקה', 'קבוצות', 'ותק', ''].map((h) => $e('th', { text: h })))), $e('tbody', {}, rows.map(row)));
+    return $e('table', {}, $e('thead', {}, $e('tr', {}, $e('th', { class: 'chk' }, all), ['עובד/ת', 'תפקיד', 'מחלקה', 'סטטוס העסקה', 'שלמות תיק / חוסרים', 'קבוצות', 'ותק', ''].map((h) => $e('th', { text: h })))), $e('tbody', {}, rows.map(row)));
   };
   const draw = () => {
     Object.assign(dflt, { q: q.value, d: fd.value, es: fes.value, t: ft.value, by: by.value }); setPref('dirGroupBy', by.value);

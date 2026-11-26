@@ -113,10 +113,10 @@ function syncSeedTemplates() {
   if (!db.prepare('SELECT 1 FROM templates LIMIT 1').get()) {
     const ins = db.prepare('INSERT INTO templates(title,description,fields,is_default,position,category,mandatory,gender_rule,institute_doc) VALUES(?,?,?,?,?,?,?,?,?)');
     seedTemplates.forEach((t, i) => ins.run(t.title, t.description, JSON.stringify(t.fields), t.is_default ? 1 : 0, i, t.category || 'כללי', t.mandatory ? 1 : 0, t.gender_rule || 'all', t.institute_doc || null));
-    putSetting('seed_version', 'v3_yifat_2026');
+    putSetting('seed_version', 'v4_yifat_2026');
     return;
   }
-  if (setting('seed_version') !== 'v3_yifat_2026') {
+  if (setting('seed_version') !== 'v4_yifat_2026') {
     const existing = db.prepare('SELECT id FROM templates ORDER BY position,id').all();
     const upd = db.prepare('UPDATE templates SET title=?,description=?,fields=?,is_default=?,position=?,category=?,mandatory=?,gender_rule=?,institute_doc=? WHERE id=?');
     const ins = db.prepare('INSERT INTO templates(title,description,fields,is_default,position,category,mandatory,gender_rule,institute_doc) VALUES(?,?,?,?,?,?,?,?,?)');
@@ -124,7 +124,7 @@ function syncSeedTemplates() {
       if (existing[i]) upd.run(t.title, t.description, JSON.stringify(t.fields), t.is_default ? 1 : 0, i, t.category || 'כללי', t.mandatory ? 1 : 0, t.gender_rule || 'all', t.institute_doc || null, existing[i].id);
       else ins.run(t.title, t.description, JSON.stringify(t.fields), t.is_default ? 1 : 0, i, t.category || 'כללי', t.mandatory ? 1 : 0, t.gender_rule || 'all', t.institute_doc || null);
     });
-    putSetting('seed_version', 'v3_yifat_2026');
+    putSetting('seed_version', 'v4_yifat_2026');
   }
 }
 syncSeedTemplates();
@@ -207,15 +207,105 @@ function cleanFields(fields) {
 }
 
 const genderOk = (rule, gender) => rule !== 'male' || gender === 'male';
+// חישוב מפורט של חוסרים, חריגות/ארכות להבאת אישור, וסטטוס כל טופס ומסמך עבור המועמד/עובד
+function employeeMissingInfo(empId) {
+  const rows = db.prepare(`
+    SELECT a.id, a.status, a.approved, a.data, a.exemptions, t.title, t.fields
+    FROM assignments a JOIN templates t ON t.id=a.template_id
+    WHERE a.employee_id=? ORDER BY t.position, t.id
+  `).all(empId);
+  const filesByAssign = new Map();
+  for (const f of db.prepare('SELECT assignment_id, field_key, approved FROM files WHERE assignment_id IN (SELECT id FROM assignments WHERE employee_id=?)').all(empId)) {
+    const arr = filesByAssign.get(f.assignment_id) || [];
+    arr.push(f);
+    filesByAssign.set(f.assignment_id, arr);
+  }
+  const missing_forms = [];
+  const unapproved_forms = [];
+  const missing_docs = [];
+  const exceptions = [];
+  let pending_ex = 0, rejected_ex = 0, active_ex = 0, expired_ex = 0;
+  const today = new Date().toISOString().slice(0, 10);
+
+  for (const a of rows) {
+    if (a.status !== 'submitted') missing_forms.push({ id: a.id, title: a.title });
+    else if (!a.approved) unapproved_forms.push({ id: a.id, title: a.title });
+
+    let fields = [];
+    try { fields = JSON.parse(a.fields || '[]'); } catch { fields = []; }
+    let exMap = {};
+    try { exMap = JSON.parse(a.exemptions || '{}'); } catch { exMap = {}; }
+    let dataMap = {};
+    try { dataMap = JSON.parse(a.data || '{}'); } catch { dataMap = {}; }
+    const aFiles = filesByAssign.get(a.id) || [];
+
+    for (const f of fields) {
+      if (f.type !== 'file') continue;
+      const hasFile = aFiles.some((x) => x.field_key === f.key);
+      const ex = exMap[f.key];
+      const needTaxCoord = f.key === 'tax_coord_101' && String(dataMap.other_income || '').includes('יש לי הכנסות נוספות');
+      const isReq = !!f.required || needTaxCoord || f.key === 'police_file';
+
+      if (ex && !hasFile) {
+        const until = ex.until || '';
+        const isExpired = ex.status === 'approved' && until && until < today;
+        if (ex.status === 'pending') pending_ex++;
+        else if (ex.status === 'rejected') rejected_ex++;
+        else if (ex.status === 'approved') {
+          if (isExpired) expired_ex++;
+          else active_ex++;
+        }
+        exceptions.push({
+          assignment_id: a.id,
+          template: a.title,
+          field_key: f.key,
+          field: f.label || f.key,
+          status: ex.status,
+          reason: ex.reason || '',
+          until,
+          expired: isExpired,
+          note: ex.note || ''
+        });
+      } else if (!hasFile && isReq) {
+        missing_docs.push({
+          assignment_id: a.id,
+          template: a.title,
+          field_key: f.key,
+          field: f.label || f.key
+        });
+      }
+    }
+  }
+  return {
+    missing_forms,
+    unapproved_forms,
+    missing_docs,
+    exceptions,
+    pending_exemptions: pending_ex,
+    rejected_exemptions: rejected_ex,
+    active_exceptions: active_ex,
+    expired_exceptions: expired_ex
+  };
+}
 // memberships: מפה מוכנה מראש (עובד → קבוצות) כשמחשבים רשימה שלמה, כדי לחסוך שאילתה לכל עובד
 function employeeRow(e, memberships) {
   const a = db.prepare("SELECT COUNT(*) total, SUM(status='submitted') done, SUM(approved=1) approved, SUM(data!='{}' OR status='submitted' OR EXISTS(SELECT 1 FROM files WHERE assignment_id=assignments.id)) touched, MAX(updated_at) last FROM assignments WHERE employee_id=?").get(e.id);
   const done = a.done || 0;
-  // new → progress → review (המועמד שלח את התיק) → approved (נקלט כעובד פעיל)
-  const status = e.approved_at ? 'approved' : e.submitted_at ? 'review' : (done || a.touched || e.opened_at ? 'progress' : 'new');
+  const info = employeeMissingInfo(e.id);
+  // new → progress → review (המועמד שלח את התיק או מילא את כל הטפסים) → approved (נקלט ואושר ע"י משאבי אנוש)
+  const status = e.approved_at ? 'approved' : (e.submitted_at || (a.total > 0 && done === a.total)) ? 'review' : (done || a.touched || e.opened_at ? 'progress' : 'new');
   return { id: e.id, token: e.token, full_name: e.full_name, id_number: e.id_number, gender: e.gender, phone: e.phone, email: e.email,
     job_title: e.job_title, department: e.department, employee_no: e.employee_no, start_date: e.start_date, source: e.source,
-    created_at: e.created_at, total: a.total, done, touched: a.touched || 0, approved: a.approved || 0, pending_exemptions: pendingExemptions(e.id), status, submitted_at: e.submitted_at, approved_at: e.approved_at, approved_by: e.approved_by, last_activity: a.last || e.opened_at || e.created_at,
+    created_at: e.created_at, total: a.total, done, touched: a.touched || 0, approved: a.approved || 0,
+    pending_exemptions: info.pending_exemptions,
+    rejected_exemptions: info.rejected_exemptions,
+    active_exceptions: info.active_exceptions,
+    expired_exceptions: info.expired_exceptions,
+    missing_forms: info.missing_forms,
+    unapproved_forms: info.unapproved_forms,
+    missing_docs: info.missing_docs,
+    exceptions: info.exceptions,
+    status, submitted_at: e.submitted_at, approved_at: e.approved_at, approved_by: e.approved_by, last_activity: a.last || e.opened_at || e.created_at,
     opened: !!e.opened_at, mail_status: e.mail_status, mail_at: e.mail_at, mail_error: e.mail_error,
     employment_status: e.employment_status || 'active', notes: e.notes || '',
     groups: memberships ? memberships.get(e.id) || [] : db.prepare('SELECT group_id FROM emp_group_members WHERE employee_id=?').all(e.id).map((g) => g.group_id) };
@@ -485,10 +575,10 @@ const allSubmitted = (empId) => { const c = db.prepare("SELECT COUNT(*) t, SUM(s
 const unsubmit = (empId) => db.prepare('UPDATE employees SET submitted_at=NULL,approved_at=NULL,approved_by=NULL WHERE id=?').run(empId);
 const pendingExemptions = (empId) => db.prepare("SELECT exemptions FROM assignments WHERE employee_id=? AND exemptions!='{}'").all(empId)
   .reduce((n, a) => n + Object.values(JSON.parse(a.exemptions)).filter((x) => x.status === 'pending').length, 0);
-// עריכה של המועמד אחרי שהתיק נשלח מחזירה אותו למילוי; אחרי קליטה העריכה חסומה
-function candidateEdit(e) {
-  if (e.approved_at) throw new HttpError(409, 'התיק כבר אושר על ידי משאבי אנוש. לשינוי פנו אליהם.');
-  if (e.submitted_at) db.prepare('UPDATE employees SET submitted_at=NULL WHERE id=?').run(e.id);
+// עריכה של המועמד אחרי שהתיק נשלח מחזירה אותו למילוי; טפסים פתוחים או מסמכים בחריגה ניתנים להשלמה גם אחרי קליטה
+function candidateEdit(e, allowIfApprovedWithException = false) {
+  if (e.approved_at && !allowIfApprovedWithException) throw new HttpError(409, 'התיק כבר אושר על ידי משאבי אנוש. לשינוי פנו אליהם.');
+  if (e.submitted_at && !e.approved_at) db.prepare('UPDATE employees SET submitted_at=NULL WHERE id=?').run(e.id);
 }
 
 // ---------- עדכונים בזמן אמת לדשבורד (Server-Sent Events) ----------
@@ -702,17 +792,34 @@ route('GET', '/api/employees', async (req, res) => {
     : db.prepare('SELECT * FROM employees WHERE archived=0 ORDER BY id DESC').all();
   send(res, 200, rows.map((e) => employeeRow(e, mem)));
 });
-// רשימת תזכורות חכמה למועמדים שטרם השלימו את כל הטפסים (נדנוד חכם עם פירוט מדויק של הטפסים החסרים)
+// רשימת תזכורות חכמה למועמדים או עובדים שחסרים להם טפסים, מסמכים או חריגה להבאת אישור
 route('GET', '/api/employees/reminders', async (req, res) => {
   const u = requireUser(req);
   const rows = u.department
-    ? db.prepare('SELECT * FROM employees WHERE archived=0 AND approved_at IS NULL AND submitted_at IS NULL AND department=? ORDER BY id DESC').all(u.department)
-    : db.prepare('SELECT * FROM employees WHERE archived=0 AND approved_at IS NULL AND submitted_at IS NULL ORDER BY id DESC').all();
+    ? db.prepare('SELECT * FROM employees WHERE archived=0 AND department=? ORDER BY id DESC').all(u.department)
+    : db.prepare('SELECT * FROM employees WHERE archived=0 ORDER BY id DESC').all();
   const out = rows.map((e) => {
-    const as = db.prepare('SELECT a.status, t.title FROM assignments a JOIN templates t ON t.id=a.template_id WHERE a.employee_id=? ORDER BY t.position,t.id').all(e.id);
-    const missing = as.filter((a) => a.status !== 'submitted').map((a) => a.title);
-    const done = as.length - missing.length;
-    return { id: e.id, full_name: e.full_name, phone: e.phone, email: e.email, department: e.department, token: e.token, done, total: as.length, missing };
+    const info = employeeMissingInfo(e.id);
+    const as = db.prepare('SELECT COUNT(*) t, SUM(status=\'submitted\') d FROM assignments WHERE employee_id=?').get(e.id);
+    const missing = [
+      ...info.missing_forms.map((f) => 'טופס: ' + f.title),
+      ...info.missing_docs.map((d) => 'מסמך חסר: ' + d.field + ' (' + d.template + ')'),
+      ...info.exceptions.map((x) => 'השלמת מסמך: ' + x.field + (x.until ? ' (חריגה עד ' + fmtIlDate(x.until) + ')' : ' (' + (x.reason || 'חסר') + ')'))
+    ];
+    return {
+      id: e.id,
+      full_name: e.full_name,
+      phone: e.phone,
+      email: e.email,
+      department: e.department,
+      token: e.token,
+      done: as.d || 0,
+      total: as.t || 0,
+      missing,
+      missing_forms: info.missing_forms,
+      missing_docs: info.missing_docs,
+      exceptions: info.exceptions
+    };
   }).filter((x) => x.missing.length > 0);
   send(res, 200, out);
 });
@@ -813,16 +920,47 @@ route('POST', '/api/employees/(\\d+)/hire', async (req, res, m) => {
   if (b.undo) {
     tx(() => {
       db.prepare('UPDATE employees SET approved_at=NULL,approved_by=NULL WHERE id=?').run(e.id);
-      db.prepare('UPDATE assignments SET approved=0 WHERE employee_id=?').run(e.id);
-      db.prepare('UPDATE files SET approved=0 WHERE assignment_id IN (SELECT id FROM assignments WHERE employee_id=?)').run(e.id);
     });
     return send(res, 200, { ok: true });
   }
-  const pend = pendingExemptions(e.id);
-  if (pend) throw new HttpError(400, `יש ${pend} בקשות פטור ממסמך שממתינות להחלטה. אשרו או דחו אותן לפני הקליטה.`);
+  const info = employeeMissingInfo(e.id);
+  const until = String(b.exception_until || '').slice(0, 10);
+  if (info.pending_exemptions && !until && !b.approve_pending_exceptions) {
+    throw new HttpError(400, `יש ${info.pending_exemptions} בקשות פטור/חריגה ממסמך שממתינות להחלטה. אשרו אותן, הגדירו חריגה עד תאריך להבאת האישור, או דחו אותן לפני הקליטה.`);
+  }
   tx(() => {
-    db.prepare('UPDATE assignments SET approved=1 WHERE employee_id=?').run(e.id);
+    // אישור קליטה מאשר רק טפסים שהושלמו ומסמכים שצורפו בפועל; טפסים או מסמכים שטרם הוגשו נשארים מסומנים כחסרים עד להשלמתם!
+    db.prepare("UPDATE assignments SET approved=1 WHERE employee_id=? AND status='submitted'").run(e.id);
     db.prepare('UPDATE files SET approved=1 WHERE assignment_id IN (SELECT id FROM assignments WHERE employee_id=?)').run(e.id);
+    if (until || b.approve_pending_exceptions) {
+      for (const a of db.prepare("SELECT id, exemptions FROM assignments WHERE employee_id=? AND exemptions!='{}'").all(e.id)) {
+        const ex = JSON.parse(a.exemptions || '{}');
+        let changed = false;
+        for (const k of Object.keys(ex)) {
+          if (ex[k].status === 'pending') {
+            ex[k].status = 'approved';
+            ex[k].decided_at = now();
+            if (until) ex[k].until = until;
+            changed = true;
+          } else if (ex[k].status === 'approved' && until && !ex[k].until) {
+            ex[k].until = until;
+            changed = true;
+          }
+        }
+        if (changed) db.prepare('UPDATE assignments SET exemptions=?,updated_at=? WHERE id=?').run(JSON.stringify(ex), now(), a.id);
+      }
+      // אם יש מסמכי חובה חסרים שטרם נרשמה להם בקשת פטור והוגדר תאריך חריגה בקליטה, נרשום להם חריגה עד התאריך שהוגדר
+      if (until && info.missing_docs.length) {
+        for (const md of info.missing_docs) {
+          const a = db.prepare('SELECT exemptions FROM assignments WHERE id=?').get(md.assignment_id);
+          const ex = JSON.parse(a?.exemptions || '{}');
+          if (!ex[md.field_key]) {
+            ex[md.field_key] = { reason: b.exception_note || 'חריגה זמנית להבאת האישור', status: 'approved', until, at: now(), decided_at: now() };
+            db.prepare('UPDATE assignments SET exemptions=?,updated_at=? WHERE id=?').run(JSON.stringify(ex), now(), md.assignment_id);
+          }
+        }
+      }
+    }
     db.prepare('UPDATE employees SET approved_at=?,approved_by=?,submitted_at=COALESCE(submitted_at,?) WHERE id=?').run(now(), u.name || u.username, now(), e.id);
   });
   send(res, 200, { ok: true });
@@ -917,12 +1055,24 @@ route('GET', '/api/exemptions', async (req, res) => {
 route('POST', '/api/exemptions/(\\d+)/decide', async (req, res, m) => {
   requireUser(req); const b = await readBody(req);
   const a = db.prepare('SELECT * FROM assignments WHERE id=?').get(+m[1]);
-  const ex = JSON.parse(a?.exemptions || '{}');
-  if (!ex[b.field] || !['approved', 'rejected'].includes(b.decision)) throw new HttpError(400, 'בקשה לא תקינה');
-  ex[b.field].status = b.decision; ex[b.field].decided_at = now();
+  if (!a) throw new HttpError(404, 'הטופס לא נמצא');
+  const ex = JSON.parse(a.exemptions || '{}');
+  if (b.decision === 'clear') {
+    delete ex[b.field];
+    db.prepare('UPDATE assignments SET exemptions=?,updated_at=? WHERE id=?').run(JSON.stringify(ex), now(), a.id);
+    return send(res, 200, { ok: true });
+  }
+  if (!['approved', 'rejected', 'pending'].includes(b.decision)) throw new HttpError(400, 'בקשה לא תקינה');
+  const cur = ex[b.field] || { reason: String(b.reason || 'חריגה זמנית להבאת האישור').slice(0, 300), at: now() };
+  cur.status = b.decision;
+  cur.decided_at = now();
+  if (b.reason !== undefined) cur.reason = String(b.reason || cur.reason || '').slice(0, 300);
+  if (b.until !== undefined) cur.until = String(b.until || '').slice(0, 10);
+  if (b.note !== undefined) cur.note = String(b.note || '').slice(0, 300);
+  ex[b.field] = cur;
   db.prepare('UPDATE assignments SET exemptions=?,updated_at=? WHERE id=?').run(JSON.stringify(ex), now(), a.id);
   if (b.decision === 'rejected') { db.prepare("UPDATE assignments SET status='pending',approved=0,submitted_at=NULL WHERE id=?").run(a.id); db.prepare('UPDATE files SET approved=0 WHERE assignment_id=?').run(a.id); unsubmit(a.employee_id); } // חוזר לעובד להשלמה
-  send(res, 200, { ok: true });
+  send(res, 200, { ok: true, exemption: cur });
 });
 
 // הרשמה עצמית של מועמד (ציבורי)
@@ -991,7 +1141,7 @@ route('PUT', '/api/e/([a-f0-9]+)/forms/(\\d+)', async (req, res, m) => {
   const b = await readBody(req);
   const tpl = parseTpl(db.prepare('SELECT * FROM templates WHERE id=?').get(a.template_id));
   const data = sanitizeData(tpl, b.data || {});
-  candidateEdit(e);
+  candidateEdit(e, a.status !== 'submitted');
   if (b.submit) {
     const files = db.prepare('SELECT field_key FROM files WHERE assignment_id=?').all(a.id);
     const errors = validateSubmission(tpl, data, files, JSON.parse(a.exemptions || '{}'));
@@ -1012,26 +1162,29 @@ route('PUT', '/api/e/([a-f0-9]+)/forms/(\\d+)', async (req, res, m) => {
 });
 route('POST', '/api/e/([a-f0-9]+)/forms/(\\d+)/files', async (req, res, m) => {
   const { e, a } = ownAssignment(m[1], m[2]);
-  if (a.status === 'submitted') throw new HttpError(409, 'הטופס כבר הוגש');
   const b = await readBody(req);
+  const ex = JSON.parse(a.exemptions || '{}');
+  const hasEx = !!ex[b.field];
+  if (a.status === 'submitted' && !hasEx && !getUser(req)) throw new HttpError(409, 'הטופס כבר הוגש');
   const tpl = parseTpl(db.prepare('SELECT * FROM templates WHERE id=?').get(a.template_id));
   if (!tpl.fields.some((f) => f.key === b.field && f.type === 'file')) throw new HttpError(400, 'שדה קובץ לא קיים');
-  candidateEdit(e);
+  candidateEdit(e, hasEx || a.status !== 'submitted' || !!getUser(req));
   send(res, 200, saveFile(a.id, b.field, b));
 });
 route('POST', '/api/e/([a-f0-9]+)/forms/(\\d+)/exempt', async (req, res, m) => {
   const { e, a } = ownAssignment(m[1], m[2]);
-  if (a.status === 'submitted') throw new HttpError(409, 'הטופס כבר הוגש');
+  const isAdmin = !!getUser(req);
+  if (a.status === 'submitted' && !isAdmin) throw new HttpError(409, 'הטופס כבר הוגש');
   const b = await readBody(req);
   const tpl = parseTpl(db.prepare('SELECT * FROM templates WHERE id=?').get(a.template_id));
-  if (!tpl.fields.some((f) => f.key === b.field && f.type === 'file' && f.allow_exempt)) throw new HttpError(400, 'לא ניתן לבקש פטור לשדה זה');
-  candidateEdit(e);
+  if (!tpl.fields.some((f) => f.key === b.field && f.type === 'file' && (f.allow_exempt || isAdmin))) throw new HttpError(400, 'לא ניתן לבקש פטור לשדה זה');
+  candidateEdit(e, a.status !== 'submitted' || isAdmin);
   const ex = JSON.parse(a.exemptions || '{}');
   if (b.cancel) delete ex[b.field];
   else {
     const reason = String(b.reason || '').trim().slice(0, 300);
     if (reason.length < 2) throw new HttpError(400, 'יש לציין סיבה');
-    ex[b.field] = { reason, status: 'pending', at: now() };
+    ex[b.field] = { reason, status: b.until && isAdmin ? 'approved' : 'pending', ...(b.until ? { until: String(b.until).slice(0, 10) } : {}), at: now() };
   }
   db.prepare('UPDATE assignments SET exemptions=?,updated_at=? WHERE id=?').run(JSON.stringify(ex), now(), a.id);
   send(res, 200, { ok: true, exemption: ex[b.field] || null });

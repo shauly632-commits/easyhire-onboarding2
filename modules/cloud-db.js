@@ -85,8 +85,8 @@ module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, require
     return buf;
   }
 
-  // שחזור כל הטבלאות והקבצים מתוך קובץ SQLite לתוך המסד הפעיל
-  function restoreFromSqliteBuffer(rawSqliteBuf) {
+  // שחזור ואיחוד חכם של כל הטבלאות והקבצים מתוך קובץ SQLite לתוך המסד הפעיל (מונע מחיקה או דריסה של עובדים!)
+  function restoreFromSqliteBuffer(rawSqliteBuf, mergeMode = true) {
     try { fs.rmSync(RESTORE_PATH, { force: true }); } catch {}
     fs.writeFileSync(RESTORE_PATH, rawSqliteBuf);
     try {
@@ -103,11 +103,24 @@ module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, require
             if (!common.length) continue;
             const colsSql = common.join(',');
             if (tbl === 'settings') {
-              // שומרים על טוקן מקומי אם כבר הוגדר, ומשלימים את כל שאר ההגדרות מהענן
               db.exec(`INSERT OR REPLACE INTO main.settings(${colsSql}) SELECT ${colsSql} FROM cloud.settings`);
-            } else {
+            } else if (!mergeMode) {
               db.exec(`DELETE FROM main.${tbl}`);
               db.exec(`INSERT INTO main.${tbl}(${colsSql}) SELECT ${colsSql} FROM cloud.${tbl}`);
+            } else {
+              // איחוד בטוח: אם הטבלה המקומית ריקה מעתיקים הכל, ואם יש נתונים משלימים רשומות מהענן מבלי למחוק רשומות מקומיות
+              const localCnt = db.prepare(`SELECT COUNT(*) c FROM main.${tbl}`).get().c;
+              if (localCnt === 0) {
+                db.exec(`INSERT INTO main.${tbl}(${colsSql}) SELECT ${colsSql} FROM cloud.${tbl}`);
+              } else if (tbl === 'employees') {
+                db.exec(`INSERT OR IGNORE INTO main.employees(${colsSql}) SELECT ${colsSql} FROM cloud.employees WHERE token NOT IN (SELECT token FROM main.employees)`);
+              } else if (tbl === 'assignments') {
+                db.exec(`INSERT OR IGNORE INTO main.assignments(${colsSql}) SELECT ${colsSql} FROM cloud.assignments`);
+              } else if (tbl === 'files') {
+                db.exec(`INSERT OR IGNORE INTO main.files(${colsSql}) SELECT ${colsSql} FROM cloud.files`);
+              } else {
+                db.exec(`INSERT OR IGNORE INTO main.${tbl}(${colsSql}) SELECT ${colsSql} FROM cloud.${tbl}`);
+              }
             }
           }
           db.exec('PRAGMA foreign_keys=ON');
@@ -300,31 +313,14 @@ module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, require
       const encBuf = Buffer.from(await res.arrayBuffer());
       const rawSqlite = decryptBuffer(encBuf);
 
-      // בדיקה חכמה: משחזרים מהענן אם הדיסק המקומי ריק או אם בענן יש יותר מועמדים/קבצים
-      let shouldRestore = localEmps === 0;
-      if (!shouldRestore) {
-        const tmpCheck = path.join(DATA_DIR, 'cloud_check.db');
-        try {
-          fs.writeFileSync(tmpCheck, rawSqlite);
-          const { DatabaseSync } = require('node:sqlite');
-          const cdb = new DatabaseSync(tmpCheck);
-          const cEmps = cdb.prepare('SELECT COUNT(*) c FROM employees').get().c;
-          const cFiles = cdb.prepare('SELECT COUNT(*) c FROM files').get().c;
-          cdb.close();
-          if (cEmps > localEmps || cFiles > localFiles) shouldRestore = true;
-        } catch {} finally {
-          try { fs.rmSync(tmpCheck, { force: true }); } catch {}
-        }
-      }
-      if (shouldRestore) {
-        restoreFromSqliteBuffer(rawSqlite);
-        if (syncSeedTemplates) syncSeedTemplates();
-        restoredOnBoot = true;
-        lastSyncAt = setting('cloud_last_sync') || now();
-        console.log('✅ מסד הנתונים והקבצים שוחזרו בהצלחה מהגיבוי הקבוע בענן!');
-        broadcast();
-      }
-      return { restored: shouldRestore, cloudReachable: true };
+      // איחוד ושחזור אוטומטי מהענן בעליית השרת (משלים עובדים וקבצים מהענן מבלי למחוק נתונים מקומיים)
+      restoreFromSqliteBuffer(rawSqlite, true);
+      if (syncSeedTemplates) syncSeedTemplates();
+      restoredOnBoot = true;
+      lastSyncAt = setting('cloud_last_sync') || now();
+      console.log('✅ מסד הנתונים והקבצים סונכרנו ושוחזרו בהצלחה מהגיבוי הקבוע בענן!');
+      broadcast();
+      return { restored: true, cloudReachable: true };
     } catch (e) {
       console.error('Cloud DB boot restore skipped:', e.message);
       return { restored: false, cloudReachable: false };
@@ -337,6 +333,15 @@ module.exports = function initCloudDb({ db, DATA_DIR, UPLOAD_DIR, route, require
       if (st && st.cloudReachable) await pushToCloudNow().catch(() => {});
       const codeOk = await syncCodeToMain(getRepo()).catch(() => false);
       if (codeOk) console.log('✅ הקוד המעודכן סונכרן אוטומטית ל-GitHub (main) ול-Render!');
+      // ניסיון חוזר אוטומטי אם הרשת לא הייתה זמינה ברגע העלייה
+      if (!st || !st.cloudReachable) {
+        setTimeout(async () => {
+          const st2 = await restoreFromCloudOnBoot().catch(() => null);
+          if (st2 && st2.cloudReachable) await pushToCloudNow().catch(() => {});
+          const ok2 = await syncCodeToMain(getRepo()).catch(() => false);
+          if (ok2) console.log('✅ הקוד המעודכן סונכרן אוטומטית ל-GitHub (main) ול-Render!');
+        }, 8000).unref();
+      }
     }
   }).catch(() => {});
 

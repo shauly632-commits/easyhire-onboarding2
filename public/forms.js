@@ -169,12 +169,12 @@
       exBox.textContent = '';
       if (!f.allow_exempt || !opts.exempt) return;
       if (exemption) {
-        const st = { approved: 'אושר', rejected: 'נדחה', pending: 'ממתין לאישור משאבי אנוש' }[exemption.status] || '';
-        exBox.append($e('div', { class: 'box' }, icon('info'), ' בקשת פטור ממסמך זה (' + st + '): ' + exemption.reason + ' ',
-          $e('button', { type: 'button', text: 'ביטול הבקשה', onclick: async () => { try { await opts.exempt(f.key, { cancel: true }); exemption = null; onExempt(null); drawEx(); } catch (e) { alert(e.message); } } })));
+        const st = exemption.until ? 'אושר בחריגה להשלמה עד ' + fmtIlDate(exemption.until) : ({ approved: 'אושר פטור', rejected: 'נדחה – חובה להעלות', pending: 'דווח כחסר – ממתין לאישור/חריגה ממשאבי אנוש' }[exemption.status] || '');
+        exBox.append($e('div', { class: 'box' }, icon('info'), ' מסמך זה סומן כחסר (' + st + '): ' + exemption.reason + ' ',
+          $e('button', { type: 'button', text: 'ביטול והעלאת מסמך', onclick: async () => { try { await opts.exempt(f.key, { cancel: true }); exemption = null; onExempt(null); drawEx(); } catch (e) { alert(e.message); } } })));
       } else if (!(existing && existing.id)) {
-        exBox.append($e('button', { type: 'button', text: 'אין לי מסמך זה', onclick: async () => {
-          const reason = prompt('מדוע אין לכם את המסמך? (הבקשה תועבר לאישור משאבי אנוש)');
+        exBox.append($e('button', { type: 'button', text: 'אין לי את הטופס / המסמך כרגע (בקשת חריגה להשלמה)', onclick: async () => {
+          const reason = prompt('מדוע אין לכם את המסמך כרגע? (יופיע כחוסר להשלמה אצל משאבי אנוש עד הבאת האישור)');
           if (!reason || reason.trim().length < 2) return;
           try { const r = await opts.exempt(f.key, { reason }); exemption = r.exemption; onExempt(exemption); drawEx(); } catch (e) { alert(e.message); }
         } }));

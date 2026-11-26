@@ -133,8 +133,8 @@ function shell({ title, sub, actions = [] }, ...body) {
       $e('div', { class: 'brand' }, $e('div', { class: 'logo', text: 'EH' }), $e('div', { style: 'min-width:0' }, $e('b', { text: 'EasyHire' }), $e('small', { text: me.company || '', title: me.company || '' }))),
       $e('nav', { class: 'navsec' },
         $e('h6', { text: 'קליטה' }),
-        item('pipeline', 'kanban', 'לוח קליטה', cnt(list.length - activeCount())),
-        item('exemptions', 'shield', 'אישורי פטור', pendingEx ? $e('span', { class: 'badge', text: pendingEx }) : null),
+        item('pipeline', 'kanban', 'לוח קליטה (כל התיקים)', cnt(list.length)),
+        item('exemptions', 'shield', 'חריגות ואישורי פטור', pendingEx ? $e('span', { class: 'badge', text: pendingEx }) : null),
         item('templates', 'file', 'סל טפסים', cnt(tplCount)),
         $e('h6', { text: 'עובדים' }),
         item('directory', 'briefcase', 'עובדים פעילים', cnt(activeCount())),
@@ -176,10 +176,34 @@ const viewSwitch = (cur, onPick, modes = [['table', 'list', 'טבלה'], ['kanba
 const search = (value, ph) => { const i = $e('input', { type: 'search', value, placeholder: ph }); return [$e('div', { class: 'srch' }, icon('search'), i), i]; };
 
 // ---------- לוח קליטה ----------
+const defaultUntilDate = (days = 30) => { const d = new Date(Date.now() + days * 864e5); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+const hasAnyMissing = (e) => (e.missing_forms && e.missing_forms.length > 0) || (e.missing_docs && e.missing_docs.length > 0) || (e.exceptions && e.exceptions.length > 0);
+const missingSummaryNode = (e) => {
+  const mf = e.missing_forms || [], md = e.missing_docs || [], ex = e.exceptions || [], uf = e.unapproved_forms || [];
+  const chips = [];
+  mf.forEach((f) => chips.push($e('span', { class: 'chip err', style: 'font-size:.73rem;padding:2px 7px', title: 'טופס טרם הוגש: ' + f.title, text: 'חסר טופס: ' + f.title.slice(0, 26) })));
+  md.forEach((d) => chips.push($e('span', { class: 'chip err', style: 'font-size:.73rem;padding:2px 7px', title: d.template + ' · ' + d.field, text: 'חסר מסמך: ' + d.field.slice(0, 26) })));
+  ex.forEach((x) => {
+    const isPend = x.status === 'pending', isRej = x.status === 'rejected', isExp = x.expired;
+    const cls = isRej || isExp ? 'err' : isPend ? '' : 'pur';
+    const txt = (isExp ? '⚠️ פג תוקף חריגה: ' : x.until ? '⏳ חריגה עד ' + fmtDate(x.until) + ': ' : isPend ? 'ממתין לאישור חריגה: ' : 'פטור/חריגה: ') + x.field.slice(0, 24);
+    chips.push($e('span', { class: 'chip ' + cls, style: 'font-size:.73rem;padding:2px 7px', title: x.template + ' · ' + x.field + (x.reason ? ' (' + x.reason + ')' : ''), text: txt }));
+  });
+  if (!chips.length && uf.length && e.status !== 'approved') {
+    chips.push($e('span', { class: 'chip pri', style: 'font-size:.73rem;padding:2px 7px', text: uf.length + ' טפסים ממתינים לאישור משאבי אנוש' }));
+  }
+  if (!chips.length) return $e('span', { class: 'chip ok', style: 'font-size:.73rem;padding:2px 7px', text: '✓ הכל הושלם ואושר' });
+  const shown = chips.slice(0, 3);
+  if (chips.length > 3) shown.push($e('span', { class: 'chip gray', style: 'font-size:.73rem;padding:2px 7px', text: '+' + (chips.length - 3) + ' נוספים' }));
+  return $e('div', { class: 'row', style: 'gap:4px;margin-top:5px;flex-wrap:wrap' }, shown);
+};
 const progress = (e) => {
   const pct = e.total ? Math.round(100 * e.done / e.total) : 0;
-  const sub = e.touched > e.done ? e.done + '/' + e.total + ' הוגשו (' + e.touched + ' עם נתונים/קבצים)' : e.done + '/' + e.total + ' טפסים';
-  return $e('div', {}, $e('div', { class: 'row', style: 'justify-content:space-between;gap:4px;font-size:.78rem' }, $e('span', { class: 'muted', text: sub }), $e('b', { style: 'font-weight:600', text: pct + '%' })), $e('div', { class: 'bar' + (pct === 100 ? ' ok' : ''), style: 'margin-top:4px' }, $e('i', { style: 'width:' + pct + '%' })));
+  const sub = e.touched > e.done ? e.done + '/' + e.total + ' הוגשו (' + e.touched + ' עם נתונים) · אושרו ' + (e.approved || 0) + '/' + e.total : e.done + '/' + e.total + ' הוגשו · אושרו ' + (e.approved || 0) + '/' + e.total;
+  return $e('div', {},
+    $e('div', { class: 'row', style: 'justify-content:space-between;gap:4px;font-size:.78rem' }, $e('span', { class: 'muted', text: sub }), $e('b', { style: 'font-weight:600', text: pct + '%' })),
+    $e('div', { class: 'bar' + (pct === 100 && !hasAnyMissing(e) ? ' ok' : ''), style: 'margin-top:4px' }, $e('i', { style: 'width:' + pct + '%' })),
+    missingSummaryNode(e));
 };
 const quickActions = (e, after) => $e('div', { class: 'quick', onclick: stop },
   $e('button', { class: 'qb', title: 'העתקת קישור אישי', icon: 'copy', onclick: () => copy(empUrl(e.token)) }),
@@ -203,13 +227,18 @@ async function pipelineView() {
   fd.value = depts.includes(flt.d) ? flt.d : '';
   const deptBtn = $e('button', { class: 'btn ghost sm', icon: 'plus', title: 'הוספה וניהול של מחלקות / דירות / מסגרות', onclick: () => manageDepartmentsModal(pipelineView) }, 'מחלקות');
   const board = $e('div');
-  const filtered = () => { const s = q.value.trim().toLowerCase(); return list.filter((e) => (!s || [e.full_name, e.phone, e.email, e.id_number, e.job_title].join(' ').toLowerCase().includes(s)) && (!flt.s || e.status === flt.s) && (!fd.value || e.department === fd.value)); };
+  const filtered = () => {
+    const s = q.value.trim().toLowerCase();
+    return list.filter((e) => (!s || [e.full_name, e.phone, e.email, e.id_number, e.job_title].join(' ').toLowerCase().includes(s))
+      && (!flt.s || (flt.s === 'missing' ? hasAnyMissing(e) : e.status === flt.s))
+      && (!fd.value || e.department === fd.value));
+  };
   const ORDER = ['review', 'progress', 'new', 'approved'];
   const row = (e) => $e('tr', { onclick: () => employeeDetail(e.id) },
     $e('td', { style: 'min-width:210px' }, who(e.full_name, [e.id_number && 'ת.ז. ' + e.id_number, e.phone].filter(Boolean).join(' · '))),
     $e('td', { class: 'c' }, statusPill(e, pipelineView)),
     $e('td', {}, $e('div', { text: e.job_title || '—' }), $e('small', { class: 'muted', text: e.department || '' })),
-    $e('td', { style: 'min-width:150px' }, progress(e)),
+    $e('td', { style: 'min-width:230px' }, progress(e)),
     $e('td', { style: 'white-space:nowrap' }, $e('span', { class: 'muted', text: e.opened ? ago(e.last_activity) : 'הקישור טרם נפתח' }),
       e.mail_status === 'failed' ? $e('small', { style: 'display:block;color:var(--err)', text: 'שליחת התיק ליפעת נכשלה' }) : null),
     $e('td', {}, quickActions(e, pipelineView)));
@@ -229,12 +258,12 @@ async function pipelineView() {
       return;
     }
     const wrap = $e('div', { class: 'groups' });
-    ORDER.filter((k) => !flt.s || k === flt.s).forEach((k) => {
+    ORDER.filter((k) => !flt.s || flt.s === 'missing' || k === flt.s).forEach((k) => {
       const [label, sc] = STATUS[k], rows = items.filter((e) => e.status === k);
-      if (!rows.length && (q.value || fd.value)) return;
+      if (!rows.length && (q.value || fd.value || flt.s === 'missing')) return;
       const g = $e('section', { class: 'grp' + (collapsed.has(k) ? ' closed' : ''), style: '--gc:' + sc },
-        $e('button', { class: 'grp-h', 'aria-expanded': !collapsed.has(k), onclick: () => { collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); g.classList.toggle('closed'); } }, icon('chevron'), label, $e('small', { text: rows.length + ' מועמדים' })),
-        $e('div', { class: 'tbl' }, rows.length ? $e('table', {}, $e('thead', {}, $e('tr', {}, ['מועמד/ת', 'סטטוס', 'תפקיד ומחלקה', 'התקדמות', 'עדכון אחרון', ''].map((h) => $e('th', { text: h })))), $e('tbody', {}, rows.map(row)))
+        $e('button', { class: 'grp-h', 'aria-expanded': !collapsed.has(k), onclick: () => { collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); g.classList.toggle('closed'); } }, icon('chevron'), label, $e('small', { text: rows.length + ' תיקים' })),
+        $e('div', { class: 'tbl' }, rows.length ? $e('table', {}, $e('thead', {}, $e('tr', {}, ['מועמד/ת / עובד/ת', 'סטטוס קליטה', 'תפקיד ומחלקה', 'מצב הטפסים וחוסרים להשלמה', 'עדכון אחרון', ''].map((h) => $e('th', { text: h })))), $e('tbody', {}, rows.map(row)))
           : empty('inbox', k === 'review' ? 'אין תיקים שממתינים לאישור' : 'אין מועמדים בשלב הזה')));
       wrap.append(g);
     });
@@ -248,24 +277,27 @@ async function pipelineView() {
   });
   draw();
   const filterBy = (s) => () => { flt.s = flt.s === s ? '' : s; pipelineView(); };
-  const cap = cfg.capacity, appr = n('approved');
-  shell({ title: 'לוח קליטה', sub: (me.department ? 'דירה / מסגרת: ' + me.department + ' · ' : '') + 'מעקב חי אחר מילוי טפסים, חתימות ואישורים',
+  const cap = cfg.capacity, appr = n('approved'), withMissing = list.filter(hasAnyMissing).length;
+  shell({ title: 'לוח קליטה ומעקב חוסרים', sub: (me.department ? 'דירה / מסגרת: ' + me.department + ' · ' : '') + 'מעקב חי אחר מילוי טפסים, חוסרים, חריגות להבאת אישור וקליטה סופית',
     actions: [
       $e('button', { class: 'btn ghost hdr', icon: 'save', title: 'גיבוי ושמירת כל הנתונים לענן ולמחשב', onclick: guard(async (ev) => {
         await busy(ev.currentTarget, () => api('/cloud-db/sync', 'POST').catch(() => {}));
         toast('כל הנתונים והקבצים נשמרו וגובו בענן ✓');
       }) }, $e('span', { class: 'bl', text: 'גיבוי / שמירה' })),
-      $e('button', { class: 'btn sec hdr', icon: 'megaphone', title: 'תזכורת אוטומטית חכמה למועמדים שטרם סיימו למלא טפסים', onclick: smartRemindersModal }, $e('span', { class: 'bl', text: 'תזכורת לממתינים' })),
+      $e('button', { class: 'btn sec hdr', icon: 'megaphone', title: 'תזכורת אוטומטית חכמה למועמדים/עובדים עם טפסים או מסמכים חסרים', onclick: smartRemindersModal }, $e('span', { class: 'bl', text: 'תזכורת לחוסרים' })),
       $e('button', { class: 'btn sec hdr', icon: 'link', title: 'העתקת קישור ההרשמה למועמדים', onclick: () => copy(location.origin + '/apply') }, $e('span', { class: 'bl', text: 'קישור הרשמה' })),
       newBtn()
     ] },
     $e('div', { class: 'kpis' },
-      kpi('users', 'var(--c-blue)', 'כל המועמדים', list.length, 'מתוך ' + cap + ' מתוכננים', { bar: Math.min(100, 100 * list.length / cap), run: filterBy(''), on: !flt.s }),
+      kpi('users', 'var(--c-blue)', 'כל התיקים', list.length, 'מועמדים ועובדים שנקלטו', { bar: Math.min(100, 100 * list.length / cap), run: filterBy(''), on: !flt.s }),
       kpi('clock', 'var(--c-orange)', 'בתהליך מילוי', n('progress'), n('new') + ' טרם התחילו', { run: filterBy('progress'), on: flt.s === 'progress' }),
-      kpi('search', 'var(--c-purple)', 'ממתינים לאישור', n('review'), 'שלחו תיק מלא לבדיקה', { run: filterBy('review'), on: flt.s === 'review' }),
-      kpi('userCheck', 'var(--c-green)', 'נקלטו', appr, (list.length ? Math.round(100 * appr / list.length) : 0) + '% מהמועמדים', { run: filterBy('approved'), on: flt.s === 'approved' })),
+      kpi('search', 'var(--c-purple)', 'ממתינים לאישור יפעת', n('review'), 'מילאו הכל וממתינים לאישור', { run: filterBy('review'), on: flt.s === 'review' }),
+      kpi('alert', 'var(--c-red)', 'עם חוסרים / חריגה', withMissing, 'חסר טופס או אישור להשלמה', { run: filterBy('missing'), on: flt.s === 'missing' }),
+      kpi('userCheck', 'var(--c-green)', 'נקלטו ואושרו', appr, 'מופיעים גם בעובדים פעילים', { run: filterBy('approved'), on: flt.s === 'approved' })),
     $e('div', { class: 'board' },
-      $e('div', { class: 'tools' }, srch, fd, deptBtn, flt.s ? $e('button', { class: 'gchip on', style: '--gc:' + STATUS[flt.s][1], onclick: filterBy(flt.s) }, STATUS[flt.s][0], ' ✕') : null, $e('span', { class: 'sp' }),
+      $e('div', { class: 'tools' }, srch, fd, deptBtn,
+        flt.s ? $e('button', { class: 'gchip on', style: '--gc:' + (flt.s === 'missing' ? 'var(--c-red)' : STATUS[flt.s][1]), onclick: filterBy(flt.s) }, (flt.s === 'missing' ? 'עם חוסרים / חריגה' : STATUS[flt.s][0]), ' ✕') : null,
+        $e('span', { class: 'sp' }),
         viewSwitch(boardMode, (k) => { boardMode = k; setPref('boardMode', k); draw(); }),
         $e('a', { class: 'btn sec sm', href: '/api/export-payroll.csv', icon: 'download', title: 'ייצוא נתוני טופס 101, בנק ופנסיה לתוכנת השכר', text: 'ייצוא 101 לשכר' }),
         $e('a', { class: 'btn ghost sm', href: '/api/export.csv', icon: 'download', text: 'ייצוא כללי' })),
@@ -387,13 +419,69 @@ async function newEmployee() {
       }) }), $e('button', { class: 'btn ghost', text: 'ביטול', onclick: () => m.remove() }))));
 }
 
-async function hire(e, after) {
-  if (!confirm('לקלוט את ' + e.full_name + ' כעובד/ת פעיל/ה? כל הטפסים יסומנו כמאושרים והעובד/ת יעברו לספריית העובדים הפעילים.')) return;
-  try { await api('/employees/' + e.id + '/hire', 'POST', {}); toast(e.full_name + ' נקלט/ה ועבר/ה לעובדים הפעילים ✓'); after(); } catch (err) { toast(err.message, true); }
+// אישור חריגה / פטור ממסמך (עם אופציה לקביעת תאריך יעד להבאת האישור החסר)
+function exceptionDecisionModal(assignId, fieldKey, fieldLabel, curEx, after) {
+  const reason = $e('input', { type: 'text', value: curEx?.reason || 'ממתין להבאת האישור / טרם הופק', placeholder: 'סיבת החוסר / הערת משאבי אנוש...' });
+  const until = $e('input', { type: 'date', value: curEx?.until || defaultUntilDate(30) });
+  const m = modal($e('div', {},
+    $e('h2', { icon: 'clock', text: 'אישור חריגה / ארכה להבאת מסמך' }),
+    $e('p', { class: 'muted', style: 'margin-top:0', text: 'מסמך: ' + fieldLabel + '. ניתן לאשר חריגה מוגבלת בזמן עד להבאת האישור (החוסר יוצג בדשבורד עד שהמסמך יועלה), או לאשר פטור קבוע.' }),
+    $e('label', { class: 'f', text: 'סיבת החוסר / הערה' }), reason,
+    $e('label', { class: 'f', text: 'תאריך יעד להבאת האישור (חריגה עד תאריך)' }), until,
+    $e('div', { class: 'row', style: 'margin-top:6px;gap:6px' },
+      [[14, 'שבועיים (14 יום)'], [30, 'חודש (30 יום)'], [60, 'חודשיים (60 יום)']].map(([days, lbl]) =>
+        $e('button', { type: 'button', class: 'btn ghost sm', text: lbl, onclick: () => { until.value = defaultUntilDate(days); } }))),
+    $e('div', { class: 'row', style: 'margin-top:20px;flex-wrap:wrap;gap:8px' },
+      $e('button', { class: 'btn', icon: 'clock', text: 'אישור חריגה עד התאריך שנבחר', onclick: guard(async (ev) => {
+        if (!until.value) return toast('יש לבחור תאריך יעד לחריגה', true);
+        await busy(ev.currentTarget, () => api('/exemptions/' + assignId + '/decide', 'POST', { field: fieldKey, decision: 'approved', reason: reason.value, until: until.value }));
+        m.remove(); toast('אושרה חריגה עד ' + fmtDate(until.value) + ' ✓'); after();
+      }) }),
+      $e('button', { class: 'btn sec', icon: 'check', text: 'פטור קבוע (ללא תאריך יעד)', onclick: guard(async (ev) => {
+        await busy(ev.currentTarget, () => api('/exemptions/' + assignId + '/decide', 'POST', { field: fieldKey, decision: 'approved', reason: reason.value, until: '' }));
+        m.remove(); toast('אושר פטור קבוע מהמסמך ✓'); after();
+      }) }),
+      $e('button', { class: 'btn danger sm', icon: 'x', text: 'דחייה (החזרה לעובד להשלמה מיידית)', onclick: guard(async (ev) => {
+        await busy(ev.currentTarget, () => api('/exemptions/' + assignId + '/decide', 'POST', { field: fieldKey, decision: 'rejected', reason: reason.value, until: '' }));
+        m.remove(); toast('הבקשה נדחתה והטופס הוחזר להשלמה'); after();
+      }) }),
+      $e('span', { class: 'sp' }),
+      $e('button', { class: 'btn ghost', text: 'ביטול', onclick: () => m.remove() }))));
+}
+
+async function hire(e, after, forceExceptionMode = false) {
+  const mf = e.missing_forms || [], md = e.missing_docs || [], ex = e.exceptions || [];
+  const hasMissing = mf.length > 0 || md.length > 0 || ex.length > 0 || forceExceptionMode;
+  if (!hasMissing) {
+    if (!confirm('לאשר סופית ש-' + e.full_name + ' מילא/ה את כל הטפסים והמסמכים ולקלוט כעובד/ת פעיל/ה?')) return;
+    try { await api('/employees/' + e.id + '/hire', 'POST', {}); toast(e.full_name + ' נקלט/ה ואושר/ה ע״י משאבי אנוש ✓'); after(); } catch (err) { toast(err.message, true); }
+    return;
+  }
+  const until = $e('input', { type: 'date', value: defaultUntilDate(30) });
+  const note = $e('input', { type: 'text', value: 'חריגה זמנית להשלמת מסמכים חסרים', placeholder: 'הערה לחריגה...' });
+  const m = modal($e('div', {},
+    $e('h2', { icon: 'userCheck', text: 'אישור קליטת עובד/ת עם מעקב חוסרים / חריגה: ' + e.full_name }),
+    $e('p', { class: 'muted', style: 'margin-top:0', text: 'שימו לב: טפסים שהוגשו יסומנו כמאושרים, אך טפסים או מסמכים שחסרים לא ייעלמו! כל חוסר ימשיך להופיע בבירור בתיק העובד ובדשבורד עד להשלמתו.' }),
+    mf.length ? $e('div', { class: 'notice', style: 'margin-bottom:10px' }, icon('alert'), $e('div', {}, $e('b', { text: 'טפסים שטרם הוגשו (' + mf.length + ') – יישארו פתוחים להשלמה:' }), $e('div', { text: mf.map((x) => x.title).join(' · ') }))) : null,
+    (md.length || ex.length) ? $e('div', { class: 'notice info', style: 'margin-bottom:10px' }, icon('clock'), $e('div', {},
+      $e('b', { text: 'מסמכים / אישורים חסרים לחריגה (' + (md.length + ex.length) + '):' }),
+      $e('div', { text: [...md.map((x) => x.field), ...ex.map((x) => x.field + (x.reason ? ' (' + x.reason + ')' : ''))].join(' · ') }))) : null,
+    $e('label', { class: 'f', text: 'חריגה עד תאריך (תאריך יעד להבאת האישורים החסרים)' }), until,
+    $e('div', { class: 'row', style: 'margin-top:6px;gap:6px' },
+      [[14, 'שבועיים'], [30, 'חודש'], [60, 'חודשיים']].map(([days, lbl]) =>
+        $e('button', { type: 'button', class: 'btn ghost sm', text: lbl, onclick: () => { until.value = defaultUntilDate(days); } }))),
+    $e('label', { class: 'f', text: 'הערת חריגה (משאבי אנוש)' }), note,
+    $e('div', { class: 'row', style: 'margin-top:20px;gap:8px;flex-wrap:wrap' },
+      $e('button', { class: 'btn okb', icon: 'clock', text: 'אישור קליטה בחריגה עד התאריך שנבחר', onclick: guard(async (ev) => {
+        await busy(ev.currentTarget, () => api('/employees/' + e.id + '/hire', 'POST', { exception_until: until.value, exception_note: note.value, approve_pending_exceptions: true }));
+        m.remove(); toast(e.full_name + ' נקלט/ה בחריגה עם מעקב חוסרים עד ' + fmtDate(until.value) + ' ✓'); after();
+      }) }),
+      $e('span', { class: 'sp' }),
+      $e('button', { class: 'btn ghost', text: 'ביטול', onclick: () => m.remove() }))), true);
 }
 async function unhire(e, after) {
-  if (!confirm('לבטל את הקליטה של ' + e.full_name + ' ולהחזיר לבדיקה? גם האישורים של הטפסים והמסמכים יבוטלו.')) return;
-  try { await api('/employees/' + e.id + '/hire', 'POST', { undo: true }); toast('הקליטה בוטלה'); after(); } catch (err) { toast(err.message, true); }
+  if (!confirm('להחזיר את התיק של ' + e.full_name + ' למצב בדיקת קליטה? (האישורים הפרטניים של הטפסים שכבר אישרתם יישמרו!)')) return;
+  try { await api('/employees/' + e.id + '/hire', 'POST', { undo: true }); toast('התיק הוחזר למצב בדיקה'); after(); } catch (err) { toast(err.message, true); }
 }
 
 // ---------- תיק עובד ----------
@@ -430,6 +518,7 @@ async function employeeDetail(id, silent) {
     const dl = $e('dl', { class: 'ans' });
     const docPreview = $e('div');
     const mergedVals = { ...pf, ...(a.data || {}) };
+    let formHasMissingDoc = false;
     t.fields.forEach((f) => {
       if (['heading', 'paragraph', 'alert', 'link'].includes(f.type)) return;
       if (f.type === 'document') {
@@ -442,16 +531,54 @@ async function employeeDetail(id, silent) {
       }
       const v = a.data[f.key]; let node;
       if (f.type === 'signature') node = v ? $e('img', { class: 'sigimg', src: v, alt: 'חתימה' }) : $e('span', { class: 'muted', text: '—' });
-      else if (f.type === 'file') node = fileMap[f.key] ? fileNode(fileMap[f.key], id) : a.exemptions[f.key] ? $e('span', { class: 'chip', text: 'פטור (' + ({ approved: 'אושר', rejected: 'נדחה', pending: 'ממתין' })[a.exemptions[f.key].status] + '): ' + a.exemptions[f.key].reason }) : $e('span', { class: 'muted', text: '—' });
+      else if (f.type === 'file') {
+        const ex = a.exemptions[f.key];
+        const needTax = f.key === 'tax_coord_101' && String(a.data.other_income || '').includes('יש לי הכנסות נוספות');
+        const isReq = !!f.required || needTax || f.key === 'police_file';
+        const uploadQuick = () => {
+          const inp = $e('input', { type: 'file', accept: 'image/*,application/pdf', style: 'display:none', onchange: guard(async () => {
+            const file = inp.files[0]; if (!file) return;
+            const b64 = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(',')[1]); fr.readAsDataURL(file); });
+            await api('/e/' + e.token + '/forms/' + t.id + '/files', 'POST', { field: f.key, filename: file.name, mime: file.type, data: b64 });
+            toast('המסמך הועלה ונשמר בתיק ✓'); refresh();
+          }) });
+          return [$e('button', { class: 'btn sm sec noprint', icon: 'upload', text: 'העלאת המסמך', onclick: () => inp.click() }), inp];
+        };
+        if (fileMap[f.key]) {
+          node = fileNode(fileMap[f.key], id);
+        } else if (ex) {
+          formHasMissingDoc = true;
+          const isPend = ex.status === 'pending', isRej = ex.status === 'rejected';
+          const stLabel = isRej ? '❌ נדחה – חובה להעלות מסמך' : ex.until ? '⏳ אושר בחריגה עד ' + fmtDate(ex.until) : isPend ? '⚠️ דווח כחסר ("אין לי מסמך זה") – ממתין להחלטת יפעת' : '✓ אושר פטור קבוע';
+          node = $e('div', { class: 'row', style: 'gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;border-radius:10px;background:' + (isRej || isPend ? 'var(--errbg)' : 'var(--warnbg)') },
+            $e('span', { class: 'chip ' + (isRej ? 'err' : isPend ? '' : 'pur'), text: stLabel }),
+            $e('span', { style: 'font-size:.88rem;font-weight:500', text: 'סיבה: ' + ex.reason }),
+            $e('button', { class: 'btn sm okb noprint', icon: 'clock', text: isPend ? 'אישור חריגה / פטור...' : 'עדכון תאריך חריגה', onclick: () => exceptionDecisionModal(a.id, f.key, f.label, ex, refresh) }),
+            ...uploadQuick());
+        } else if (isReq) {
+          formHasMissingDoc = true;
+          node = $e('div', { class: 'row', style: 'gap:8px;align-items:center;flex-wrap:wrap' },
+            $e('span', { class: 'chip err', text: '⚠️ חסר מסמך חובה' }),
+            $e('button', { class: 'btn sm ghost noprint', icon: 'clock', text: 'מתן חריגה עד תאריך...', onclick: () => exceptionDecisionModal(a.id, f.key, f.label, null, refresh) }),
+            ...uploadQuick());
+        } else {
+          node = $e('div', { class: 'row', style: 'gap:8px;align-items:center' }, $e('span', { class: 'muted', text: 'לא צורף (רשות)' }), ...uploadQuick());
+        }
+      }
       else if (f.type === 'consent') node = v ? $e('span', { class: 'okt', icon: 'check', text: 'אושר' }) : document.createTextNode('—');
       else node = document.createTextNode(v || '—');
       dl.append($e('dt', { text: f.label }), $e('dd', {}, node));
     });
-    const stText = ok ? 'הוגש ' + fmt(a.submitted_at) : hasContent ? 'נשמרה טיוטה · ' + fmt(a.updated_at) : 'ממתין';
-    return $e('div', { class: 'card fcard', id: 'a' + a.id },
-      $e('div', { class: 'row' }, $e('h3', { style: 'margin:0', text: t.title }), $e('span', { class: 'chip' + (ok ? ' ok' : hasContent ? ' pri' : ''), text: stText }), a.approved ? $e('span', { class: 'chip ok', icon: 'check', text: 'אושר ע״י משאבי אנוש' }) : null, $e('span', { class: 'sp' }),
+    const stText = ok ? 'הוגש ' + fmt(a.submitted_at) : hasContent ? 'נשמרה טיוטה · ' + fmt(a.updated_at) : 'טרם מולא (חסר)';
+    return $e('div', { class: 'card fcard', id: 'a' + a.id, style: (!ok || formHasMissingDoc) ? 'border-inline-start:5px solid var(--c-red)' : a.approved ? 'border-inline-start:5px solid var(--c-green)' : '' },
+      $e('div', { class: 'row' },
+        $e('h3', { style: 'margin:0', text: t.title }),
+        $e('span', { class: 'chip' + (ok ? ' ok' : hasContent ? ' pri' : ' err'), text: stText }),
+        formHasMissingDoc ? $e('span', { class: 'chip err', icon: 'alert', text: 'קיים מסמך חסר / בחריגה' }) : null,
+        a.approved ? $e('span', { class: 'chip ok', icon: 'check', text: 'אושר ע״י משאבי אנוש' }) : null,
+        $e('span', { class: 'sp' }),
         $e('button', { class: 'btn ghost sm noprint', icon: 'pen', text: 'עריכת פרטים / חתימה', onclick: () => editAssignmentModal(e, a, refresh) }),
-        hasContent ? $e('button', { class: 'btn sm noprint ' + (a.approved ? 'ghost' : 'sec'), icon: a.approved ? 'undo' : 'check', text: a.approved ? 'ביטול אישור' : 'אישור הטופס', onclick: guard(async () => { await api('/assignments/' + a.id + '/approve', 'POST', { approved: !a.approved }); refresh(); }) }) : null,
+        $e('button', { class: 'btn sm noprint ' + (a.approved ? 'ghost' : 'sec'), icon: a.approved ? 'undo' : 'check', text: a.approved ? 'ביטול אישור טופס' : 'אישור טופס זה', onclick: guard(async () => { await api('/assignments/' + a.id + '/approve', 'POST', { approved: !a.approved }); refresh(); }) }),
         $e('button', { class: 'qb noprint', title: 'עוד', icon: 'more', onclick: (ev) => menu(ev.currentTarget, [
           { label: 'עריכת פרטי הטופס וחתימה', icon: 'pen', run: () => editAssignmentModal(e, a, refresh) },
           { label: 'פתיחה מחדש לעריכה ע״י העובד', icon: 'undo', disabled: !ok && !a.approved, run: guard(async () => { if (confirm('לפתוח את הטופס לעריכה מחודשת על ידי העובד?')) { await api('/assignments/' + a.id + '/reopen', 'POST'); refresh(); } }) },
@@ -460,18 +587,42 @@ async function employeeDetail(id, silent) {
   });
   const allFiles = d.assignments.flatMap((a) => a.files), filesOk = allFiles.filter((f) => f.approved).length;
   const allOk = d.assignments.length && d.assignments.every((a) => a.status === 'submitted');
+  const mf = e.missing_forms || [], md = e.missing_docs || [], ex = e.exceptions || [];
+  const hasMissing = mf.length > 0 || md.length > 0 || ex.length > 0;
+  const missingBanner = hasMissing ? $e('div', { class: 'card noprint', style: 'border:1.5px solid #ff8f00;background:#fff8eb;margin-bottom:14px' },
+    $e('div', { class: 'row' },
+      $e('h3', { style: 'margin:0;color:#b86e00', icon: 'alert', text: 'ריכוז חוסרים וחריגות להשלמה בתיק זה (' + (mf.length + md.length + ex.length) + ')' }),
+      $e('span', { class: 'sp' }),
+      e.phone ? $e('a', { class: 'btn okb sm', target: '_blank', rel: 'noopener', icon: 'whatsapp', text: 'שליחת תזכורת חוסרים בוואטסאפ',
+        href: 'https://wa.me/' + waPhone(e.phone) + '?text=' + encodeURIComponent(
+          'שלום ' + e.full_name.split(' ')[0] + ',\nתזכורת ממשאבי אנוש (אודי מרילי) – להשלמת תיק הקליטה שלך חסרים הפריטים הבאים:\n• ' +
+          [...mf.map((x) => 'טופס: ' + x.title), ...md.map((x) => 'מסמך: ' + x.field), ...ex.map((x) => x.field + (x.until ? ' (חריגה עד ' + fmtDate(x.until) + ')' : ''))].join('\n• ') +
+          '\n\nלהשלמה והעלאה ישירה מהטלפון לחצו על הקישור האישי:\n' + empUrl(e.token)
+        ) }) : null),
+    mf.length ? $e('div', { style: 'margin-top:8px;font-size:.9rem' }, $e('b', { text: '• טפסים שטרם הוגשו (' + mf.length + '): ' }), mf.map((x) => x.title).join(' · ')) : null,
+    md.length ? $e('div', { style: 'margin-top:6px;font-size:.9rem' }, $e('b', { text: '• מסמכי חובה שטרם הועלו (' + md.length + '): ' }), md.map((x) => x.field + ' (' + x.template + ')').join(' · ')) : null,
+    ex.length ? $e('div', { style: 'margin-top:6px;font-size:.9rem' }, $e('b', { text: '• מסמכים בחריגה / בקשת פטור (' + ex.length + '): ' }), ex.map((x) => x.field + (x.until ? ' [עד ' + fmtDate(x.until) + ']' : ' [' + (x.status === 'pending' ? 'ממתין לאישור' : x.reason) + ']')).join(' · ')) : null)
+    : $e('div', { class: 'card noprint', style: 'border:1.5px solid #00c875;background:#f2fbf6;margin-bottom:14px;padding:14px 18px' },
+      $e('b', { class: 'okt', icon: 'checkCircle', text: 'כל הטפסים והמסמכים בתיק זה הושלמו במלואם ללא חוסרים!' }));
+
   const hireBar = active
-    ? $e('div', { class: 'hirebar noprint', style: 'background:var(--okbg)' }, $e('b', { class: 'okt', icon: 'checkCircle', text: 'נקלט/ה כעובד/ת פעיל/ה · כל הטפסים והמסמכים שמורים בתיק' }), $e('span', { class: 'muted', text: fmt(e.approved_at) + (e.approved_by ? ' · אושר ע״י ' + e.approved_by : '') }), $e('span', { class: 'sp' }),
-      $e('button', { class: 'btn ghost sm', icon: 'undo', text: 'ביטול קליטה', onclick: () => unhire(e, refresh) }))
-    : e.status === 'review'
-      ? $e('div', { class: 'hirebar noprint', style: 'background:var(--purbg)' }, $e('div', {}, $e('b', { icon: 'search', text: 'התיק נשלח לבדיקה ' + fmt(e.submitted_at) }), $e('div', { class: 'muted', text: 'אושרו ' + e.approved + '/' + e.total + ' טפסים ו-' + filesOk + '/' + allFiles.length + ' מסמכים. אפשר לאשר כל מסמך בנפרד, או לקלוט ולאשר הכל בבת אחת.' }),
-          e.pending_exemptions ? $e('div', { class: 'exwarn', icon: 'alert' }, e.pending_exemptions + ' בקשות פטור ממתינות להחלטה. ', $e('a', { href: '#', text: 'למסך אישורי הפטור', onclick: (ev) => { ev.preventDefault(); view = 'exemptions'; go(); } })) : null), $e('span', { class: 'sp' }),
-        $e('button', { class: 'btn okb', icon: 'userCheck', text: 'אישור וקליטה', disabled: !!e.pending_exemptions, title: e.pending_exemptions ? 'יש להחליט על בקשות הפטור לפני הקליטה' : '', onclick: () => hire(e, refresh) }))
-      : $e('div', { class: 'hirebar noprint', style: 'background:#f0f1f5' }, $e('div', {}, $e('span', { class: 'muted', text: allOk ? 'כל הטפסים הוגשו! ניתן לאשר ולקלוט את העובד/ת כעת.' : 'המועמד ממלא טפסים (' + e.done + '/' + e.total + ' הוגשו, ' + allFiles.length + ' קבצים הועלו). כל טופס וקובץ נשמרים אוטומטית לפני ואחרי האישור.' }),
-          e.pending_exemptions ? $e('div', { class: 'exwarn', icon: 'alert' }, e.pending_exemptions + ' בקשות פטור ממתינות להחלטה.') : null), $e('span', { class: 'sp' }),
-        $e('button', { class: 'btn okb', icon: 'userCheck', text: 'אישור וקליטה', disabled: !!e.pending_exemptions, onclick: () => hire(e, refresh) }));
+    ? $e('div', { class: 'hirebar noprint', style: 'background:var(--okbg)' },
+      $e('div', {},
+        $e('b', { class: 'okt', icon: 'checkCircle', text: hasMissing ? 'נקלט/ה כעובד/ת פעיל/ה (עם מעקב חריגה להשלמת חוסרים)' : 'נקלט/ה ואושר/ה סופית ע״י משאבי אנוש · כל הטפסים מלאים' }),
+        $e('div', { class: 'muted', style: 'font-size:.86rem', text: 'אושר בתאריך ' + fmt(e.approved_at) + (e.approved_by ? ' ע״י ' + e.approved_by : '') + ' · ניתן לאשר או לבטל אישור של כל טופס ומסמך בנפרד גם לאחר הקליטה' })),
+      $e('span', { class: 'sp' }),
+      $e('button', { class: 'btn ghost sm', icon: 'undo', text: 'החזרה לבדיקת קליטה', onclick: () => unhire(e, refresh) }))
+    : $e('div', { class: 'hirebar noprint', style: 'background:' + (e.status === 'review' ? 'var(--purbg)' : '#f0f1f5') },
+      $e('div', {},
+        $e('b', { icon: e.status === 'review' ? 'search' : 'clock', text: e.status === 'review' ? 'התיק מוכן וממתין לאישור משאבי אנוש' : 'המועמד בתהליך השלמת טפסים (' + e.done + '/' + e.total + ' טפסים הוגשו)' }),
+        $e('div', { class: 'muted', style: 'font-size:.86rem', text: 'אושרו פרטנית ' + e.approved + '/' + e.total + ' טפסים ו-' + filesOk + '/' + allFiles.length + ' מסמכים. התיק יישאר בלוח הקליטה עד לאישור מפורש של משאבי אנוש או אישור בחריגה.' })),
+      $e('span', { class: 'sp' }),
+      hasMissing
+        ? $e('button', { class: 'btn sec', icon: 'clock', text: 'אישור קליטה בחריגה (עד תאריך)...', onclick: () => hire(e, refresh, true) })
+        : null,
+      $e('button', { class: 'btn okb', icon: 'userCheck', text: hasMissing ? 'אישור וקליטה עם חוסרים' : 'אישור סופי וקליטת עובד/ת', onclick: () => hire(e, refresh) }));
   const missing = tpls.filter((t) => !d.assignments.some((a) => a.template.id === t.id) && (t.gender_rule !== 'male' || e.gender === 'male'));
-  const formsTab = () => [hireBar, cards,
+  const formsTab = () => [missingBanner, hireBar, cards,
     missing.length ? $e('div', { class: 'card noprint' }, $e('h3', { icon: 'plus', text: 'הוספת טפסים' }), (() => {
       const cs = missing.map((t) => [t, $e('input', { type: 'checkbox' })]);
       return $e('div', {}, $e('div', { class: 'checks' }, cs.map(([t, c]) => $e('label', {}, c, t.title))),
@@ -537,20 +688,28 @@ function editEmployee(e) {
       $e('button', { class: 'btn ghost', text: 'ביטול', onclick: () => m.remove() }))));
 }
 
-// ---------- פטורים ----------
+// ---------- חריגות ואישורי פטור ----------
 async function exemptionsView() {
   const seq = renderSeq;
   const { ex } = await refreshMeta();
   if (seq !== renderSeq || view !== 'exemptions') return;
-  const rows = ex.map((x) => $e('div', { class: 'exrow' },
-    $e('div', { style: 'flex:1;min-width:240px' }, who(x.employee, x.template + ' · ' + x.field), $e('div', { style: 'margin-top:6px', text: 'סיבה: ' + x.reason }), $e('small', { class: 'muted', text: fmt(x.at) })),
-    x.status === 'pending' ? $e('div', { class: 'row' },
-      $e('button', { class: 'btn okb sm', icon: 'check', text: 'אישור פטור', onclick: guard(async () => { await api('/exemptions/' + x.assignment_id + '/decide', 'POST', { field: x.field_key, decision: 'approved' }); exemptionsView(); }) }),
-      $e('button', { class: 'btn ghost sm', icon: 'x', text: 'דחייה (יתבקש להעלות)', onclick: guard(async () => { await api('/exemptions/' + x.assignment_id + '/decide', 'POST', { field: x.field_key, decision: 'rejected' }); exemptionsView(); }) }))
-      : pill(x.status === 'approved' ? 'אושר' : 'נדחה', x.status === 'approved' ? 'var(--c-green)' : 'var(--c-red)', { sm: true }),
-    $e('button', { class: 'btn sec sm', text: 'פתיחת תיק', onclick: () => employeeDetail(x.employee_id) })));
-  shell({ title: 'אישורי פטור ממסמך', sub: 'מועמדים שאין להם מסמך מסוים מבקשים פטור עם סיבה' },
-    $e('div', { class: 'card' }, rows.length ? rows : empty('shield', 'אין בקשות פטור כרגע')));
+  const rows = ex.map((x) => {
+    const isPend = x.status === 'pending', isRej = x.status === 'rejected';
+    return $e('div', { class: 'exrow' },
+      $e('div', { style: 'flex:1;min-width:240px' },
+        who(x.employee, x.template + ' · ' + x.field),
+        $e('div', { style: 'margin-top:6px;font-weight:500', text: 'סיבה: ' + x.reason }),
+        x.until ? $e('div', { style: 'margin-top:3px;font-size:.86rem;color:var(--pur)', text: '⏳ חריגה מאושרת להבאת האישור עד: ' + fmtDate(x.until) }) : null,
+        $e('small', { class: 'muted', text: fmt(x.at) })),
+      $e('div', { class: 'row', style: 'gap:6px' },
+        pill(isPend ? 'ממתין לאישור' : isRej ? 'נדחה – חובה להעלות' : x.until ? 'בחריגה עד ' + fmtDate(x.until) : 'אושר פטור קבוע',
+          isPend ? 'var(--c-orange)' : isRej ? 'var(--c-red)' : x.until ? 'var(--c-purple)' : 'var(--c-green)', { sm: true }),
+        $e('button', { class: 'btn okb sm', icon: 'clock', text: isPend ? 'אישור חריגה / פטור...' : 'עריכת חריגה', onclick: () => exceptionDecisionModal(x.assignment_id, x.field_key, x.field, x, exemptionsView) }),
+        isPend ? $e('button', { class: 'btn ghost sm', icon: 'x', text: 'דחייה', onclick: guard(async () => { await api('/exemptions/' + x.assignment_id + '/decide', 'POST', { field: x.field_key, decision: 'rejected' }); exemptionsView(); }) }) : null,
+        $e('button', { class: 'btn sec sm', text: 'פתיחת תיק', onclick: () => employeeDetail(x.employee_id) })));
+  });
+  shell({ title: 'חריגות ואישורי פטור ממסמכים', sub: 'ניהול מסמכים שסומנו כ"אין לי מסמך זה" – מתן ארכה מוגבלת בזמן להבאת האישור או פטור' },
+    $e('div', { class: 'card' }, rows.length ? rows : empty('shield', 'אין בקשות פטור או חריגות פתוחות כרגע')));
 }
 
 // ---------- סל טפסים ----------
